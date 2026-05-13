@@ -120,6 +120,7 @@ Known playbook IDs: `diagram`, `table`, `comparison`, `plan`, `diff`, `input`, `
 | ---------------------------------------------- | --------------------- | ------------------------------------------------------------------------- |
 | `lavish-axi <html-file>`                       | `--no-open`           | Ensure the server/session exists without opening another browser window.  |
 | `lavish-axi <html-file> / poll / end / server` | `--host <host>`       | Bind the server to another interface; defaults to `127.0.0.1`.            |
+| `lavish-axi server`                            | `--port <port>`       | Override the server port; defaults to `4387`.                             |
 | `lavish-axi poll`                              | `--agent-reply "..."` | Show the agent's reply in the existing browser chat before polling again. |
 | `lavish-axi poll`                              | `--timeout-ms <ms>`   | Test/debug escape hatch only; agents should normally omit it.             |
 
