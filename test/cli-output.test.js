@@ -25,6 +25,7 @@ import {
   shouldReuseServerForHost,
   shouldOpenBrowser,
   shouldRestartServer,
+  isLocalServerHost,
   telemetryCommandName,
   VERSION,
 } from "../src/cli.js";
@@ -411,8 +412,19 @@ test("scoped IPv6 hosts stay raw for client requests", () => {
 test("server reuse respects explicit bind hosts", () => {
   assert.equal(shouldReuseServerForHost("127.0.0.1", { host: "127.0.0.1" }), true);
   assert.equal(shouldReuseServerForHost("0.0.0.0", { host: "0.0.0.0" }), true);
-  assert.equal(shouldReuseServerForHost("0.0.0.0", { host: "127.0.0.1" }), false);
-  assert.equal(shouldReuseServerForHost("100.64.0.1", { host: "100.64.0.2" }), false);
+  assert.equal(shouldReuseServerForHost("0.0.0.0", { host: "127.0.0.1" }), true);
+  assert.equal(shouldReuseServerForHost("203.0.113.10", { host: "0.0.0.0" }), true);
+  assert.equal(shouldReuseServerForHost("203.0.113.10", { host: "::" }), true);
+  assert.equal(shouldReuseServerForHost("203.0.113.10", { host: "203.0.113.11" }), false);
+});
+
+test("local server host detection keeps remote hosts from starting local servers", () => {
+  assert.equal(isLocalServerHost("127.0.0.1"), true);
+  assert.equal(isLocalServerHost("127.0.0.2"), true);
+  assert.equal(isLocalServerHost("localhost"), true);
+  assert.equal(isLocalServerHost("0.0.0.0"), true);
+  assert.equal(isLocalServerHost("::"), true);
+  assert.equal(isLocalServerHost("203.0.113.10"), false);
 });
 
 const wildcardBindHost = firstNonInternalIpv4();
