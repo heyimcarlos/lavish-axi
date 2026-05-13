@@ -321,7 +321,7 @@ async function ensureServer({ forceRestart = false, host = "127.0.0.1" } = {}) {
     await delay(100);
   }
   throw new AxiError("Lavish Editor server did not start", "SERVER_ERROR", [
-    `Run \`lavish-axi server --port ${port}\` to inspect server startup`,
+    `Run \`lavish-axi server --host ${host} --port ${port}\` to inspect server startup`,
   ]);
 }
 
