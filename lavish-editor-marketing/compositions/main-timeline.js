@@ -46,23 +46,11 @@ focusPull("#scene-terminal", "#scene-editor", 8.85);
 
 tl.from(".editor-window-1", { y: 42, scale: 0.985, duration: 0.72, ease: "power3.out" }, 9.24);
 tl.from("#scene-editor .browser-bar", { y: -18, opacity: 0, duration: 0.42, ease: "power2.out" }, 9.38);
-tl.from(
-  "#scene-editor .topbar > *",
-  { y: -12, opacity: 0, duration: 0.36, stagger: 0.045, ease: "sine.out" },
-  9.52,
-);
+tl.from("#scene-editor .topbar > *", { y: -12, opacity: 0, duration: 0.36, stagger: 0.045, ease: "sine.out" }, 9.52);
 tl.from("#scene-editor .report-header", { y: 28, opacity: 0, duration: 0.58, ease: "expo.out" }, 9.72);
-tl.from(
-  "#scene-editor .chart-card",
-  { y: 28, opacity: 0, duration: 0.56, stagger: 0.1, ease: "power3.out" },
-  10.0,
-);
+tl.from("#scene-editor .chart-card", { y: 28, opacity: 0, duration: 0.56, stagger: 0.1, ease: "power3.out" }, 10.0);
 tl.from("#scene-editor .chat-panel", { x: 34, opacity: 0, duration: 0.52, ease: "power2.out" }, 10.42);
-tl.from(
-  "#scene-editor .bubble.agent:first-child",
-  { x: 18, opacity: 0, duration: 0.38, ease: "sine.out" },
-  10.78,
-);
+tl.from("#scene-editor .bubble.agent:first-child", { x: 18, opacity: 0, duration: 0.38, ease: "sine.out" }, 10.78);
 tl.from("#scene-editor .composer", { y: 24, opacity: 0, duration: 0.46, ease: "power1.out" }, 10.92);
 
 tl.to("#pointer-1", { opacity: 1, duration: 0.24, ease: "power1.out" }, 11.48);
@@ -126,11 +114,7 @@ tl.to(".chart-after", { opacity: 1, duration: 0.42, ease: "power1.out" }, 25.04)
 tl.from("#scene-editor .diagram-node.updated", { scale: 0.92, duration: 0.46, ease: "power3.out" }, 25.04);
 tl.to("#scene-editor .before-token", { opacity: 0, duration: 0.24, ease: "sine.out" }, 25.12);
 tl.to("#scene-editor .after-token", { opacity: 1, duration: 0.3, ease: "power2.out" }, 25.22);
-tl.to(
-  "#scene-editor .failure-item",
-  { opacity: 1, y: -2, duration: 0.34, stagger: 0.08, ease: "power2.out" },
-  25.2,
-);
+tl.to("#scene-editor .failure-item", { opacity: 1, y: -2, duration: 0.34, stagger: 0.08, ease: "power2.out" }, 25.2);
 tl.to(".working", { opacity: 0, y: 4, duration: 0.24, ease: "sine.out" }, 26.2);
 tl.to(".done-bubble", { opacity: 1, y: -4, duration: 0.34, ease: "power2.out" }, 26.36);
 

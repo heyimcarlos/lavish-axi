@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <link rel="stylesheet" href="main.css" />
+  </head>
+  <body>
+    <div
+      id="root"
+      data-composition-id="scene-zoom"
+      data-start="0"
+      data-duration="33.5"
+      data-width="1920"
+      data-height="1080"
+    >
+      <section id="scene-zoom" class="scene">
+        <div class="scene-content browser-stage zoom-stage">
+          <div class="browser-window editor-window-2" data-layout-allow-overflow>
+            <div class="browser-bar">
+              <div class="traffic"><span></span><span></span><span></span></div>
+              <div class="address">127.0.0.1:4387/session/9a7c2f31</div>
+            </div>
+            <div class="editor">
+              <div class="topbar">
+                <div class="brand"><span class="lavish">Lavish</span><span class="editor-word">Editor</span></div>
+                <div class="divider"></div>
+                <div class="file-wrap">
+                  <div class="file-input">/var/folders/tmp/design-plan.html</div>
+                  <button class="copy-button">Copy Path</button>
+                </div>
+                <button class="button secondary">Annotation: On</button
+                ><button class="button danger">End Session</button>
+              </div>
+              <div class="workbench">
+                <div class="artifact-frame">
+                  <div class="report-page">
+                    <div class="report-header">
+                      <div>
+                        <div class="eyebrow" style="color: #756a58">Updated technical plan</div>
+                        <h2>Precise corrections, plan-level guidance</h2>
+                        <p>The corrected diagram and persistence choice stay attached to the design review context.</p>
+                      </div>
+                      <div class="report-date">
+                        <span>Design review</span><span>Local-first</span><span>Agent feedback loop</span>
+                      </div>
+                    </div>
+                    <div class="charts">
+                      <div class="chart-card target">
+                        <div class="outline-target" style="opacity: 1"></div>
+                        <div class="chart-title">Architecture diagram</div>
+                        <div class="chart-subtitle">Corrected to match the CLI contract</div>
+                        <div class="architecture-diagram">
+                          <div class="diagram-flow">
+                            <div class="diagram-node">
+                              <strong>SDK in iframe</strong><span>selector + DOM snapshot</span>
+                            </div>
+                            <div class="diagram-arrow">-&gt;</div>
+                            <div class="diagram-node updated">
+                              <strong>WebSocket channel</strong><span>push feedback to agent</span>
+                            </div>
+                            <div class="diagram-arrow">-&gt;</div>
+                            <div class="diagram-node">
+                              <strong>Agent patch</strong><span>edits the HTML artifact</span>
+                            </div>
+                          </div>
+                          <div class="design-note">
+                            The diagram explains the technical approach with a live collaboration channel.
+                          </div>
+                        </div>
+                      </div>
+                      <div class="chart-card">
+                        <div class="chart-title">State and recovery</div>
+                        <div class="chart-subtitle">SQLite plus explicit failure modes</div>
+                        <div class="decision-list">
+                          <div class="decision-item">
+                            <strong>Session store</strong> Use <span class="change-token">SQLite</span> for queued
+                            prompts and session status.
+                          </div>
+                          <div class="failure-list">
+                            <div class="failure-item" style="opacity: 1">
+                              Server restart: poll resumes from persisted state.
+                            </div>
+                            <div class="failure-item" style="opacity: 1">
+                              Missing session: reopen the same HTML path.
+                            </div>
+                            <div class="failure-item" style="opacity: 1">
+                              Bad asset path: reject traversal outside the artifact directory.
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <aside class="chat-panel">
+                  <h3>Conversation</h3>
+                  <div class="chat-log">
+                    <div class="bubble user" style="opacity: 1">
+                      <small>You</small>
+                      <div>On architecture diagram: use WebSocket instead of long-poll</div>
+                      <div>On state section: use SQLite instead of local file store</div>
+                      <div>surface failure modes and recovery paths</div>
+                    </div>
+                    <div class="bubble agent" style="opacity: 1">
+                      <small>Agent</small>
+                      <div>
+                        Done. I switched the plan to WebSocket, changed storage to SQLite, and surfaced failure modes
+                        across the plan.
+                      </div>
+                    </div>
+                  </div>
+                  <div class="composer">
+                    <div class="pills"></div>
+                    <div class="textarea">Write a message for the agent...</div>
+                    <div class="send-row"><button class="send-button">Send to Agent</button></div>
+                  </div>
+                </aside>
+              </div>
+            </div>
+          </div>
+          <div class="zoom-copy">
+            <div class="eyebrow">The part that matters</div>
+            <h2>Review the plan where the decisions live.</h2>
+            <p>Surgical annotations correct exact assumptions. Chat feedback changes the whole artifact.</p>
+          </div>
+        </div>
+      </section>
+    </div>
+    <script>
+      window.__timelines = window.__timelines || {};
+      window.__timelines["scene-zoom"] = gsap.timeline({ paused: true });
+    </script>
+  </body>
+</html>

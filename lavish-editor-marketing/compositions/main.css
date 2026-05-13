@@ -685,12 +685,7 @@ body {
   width: 172px;
   height: 172px;
   border-radius: 50%;
-  background: conic-gradient(
-    #2b251b 0deg 166deg,
-    #9b8444 166deg 263deg,
-    #d7bc73 263deg 320deg,
-    #e8d9b5 320deg 360deg
-  );
+  background: conic-gradient(#2b251b 0deg 166deg, #9b8444 166deg 263deg, #d7bc73 263deg 320deg, #e8d9b5 320deg 360deg);
   border: 10px solid #fff7e8;
 }
 
