@@ -556,7 +556,7 @@ test("session URL uses the custom --host instead of localhost", async () => {
   }
 });
 
-test("wildcard bind hosts advertise localhost session URLs", async () => {
+test("wildcard bind hosts advertise matching loopback session URLs", async () => {
   const dir = await mkdtemp(path.join(tmpdir(), "lavish-serve-"));
   const artifactPath = path.join(dir, "test.html");
   await writeFile(artifactPath, "<h1>Wildcard host test</h1>");
@@ -570,8 +570,8 @@ test("wildcard bind hosts advertise localhost session URLs", async () => {
     });
     const body = await res.json();
     assert.equal(res.status, 200);
-    assert.match(body.url, /^http:\/\/localhost:\d+\/session\//);
-    assert.doesNotMatch(body.url, /0\.0\.0\.0/);
+    assert.match(body.url, /^http:\/\/127\.0\.0\.1:\d+\/session\//);
+    assert.doesNotMatch(body.url, /localhost|0\.0\.0\.0/);
     const health = await (await fetch(`http://127.0.0.1:${server.port}/health`)).json();
     assert.equal(health.host, "0.0.0.0");
   } finally {
