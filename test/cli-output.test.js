@@ -16,6 +16,7 @@ import {
   createPollOutput,
   createPlaybookOutput,
   createServerSpawnOptions,
+  fileArg,
   getCommandHelp,
   normalizeArgv,
   resolveServerEntry,
@@ -321,4 +322,20 @@ test("polling a file without an active session tells the agent to open it first"
       return true;
     },
   );
+});
+
+test("fileArg extracts the HTML file when --host flag is present", () => {
+  assert.equal(fileArg(["artifact.html"]), "artifact.html");
+  assert.equal(fileArg(["--host", "100.64.0.1", "artifact.html"]), "artifact.html");
+  assert.equal(fileArg(["--no-open", "--host", "100.64.0.1", "artifact.html"]), "artifact.html");
+  assert.equal(fileArg(["artifact.html", "--host", "100.64.0.1"]), "artifact.html");
+});
+
+test("fileArg ignores flag values that could be confused with the file", () => {
+  assert.equal(fileArg(["--host", "100.64.0.1", "--port", "1234", "artifact.html"]), "artifact.html");
+});
+
+test("fileArg returns undefined when no file is present", () => {
+  assert.equal(fileArg(["--host", "100.64.0.1"]), undefined);
+  assert.equal(fileArg([]), undefined);
 });

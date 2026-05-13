@@ -29,7 +29,7 @@ const designAssetUrls = {
   },
 };
 
-export async function serve({ port, stateFile, version = "" }) {
+export async function serve({ port, host = "127.0.0.1", stateFile, version = "" }) {
   const app = express();
   const store = new SessionStore(stateFile);
   const events = new EventEmitter();
@@ -58,7 +58,7 @@ export async function serve({ port, stateFile, version = "" }) {
     try {
       const file = await canonicalFile(req.body.file);
       const key = sessionKey(file);
-      const url = `http://localhost:${port}/session/${key}`;
+      const url = `http://${host}:${port}/session/${key}`;
       const session = await store.upsertSession(file, url);
       watchSession(session, watchers, events);
       res.json({ key, file, url, status: "opened" });
@@ -293,7 +293,7 @@ export async function serve({ port, stateFile, version = "" }) {
   });
 
   const httpServer = await new Promise((resolve) => {
-    const s = app.listen(port, "127.0.0.1", () => resolve(s));
+    const s = app.listen(port, host, () => resolve(s));
   });
 
   let shuttingDown = false;

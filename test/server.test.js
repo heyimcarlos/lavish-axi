@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -529,4 +529,28 @@ test("ended session message renders centered in the main content area", async ()
   assert.match(js, /Return to your agent to continue\./);
   assert.doesNotMatch(js, /The agent polling loop can stop\./);
   assert.doesNotMatch(js, /<span class="file">Session ended\. The agent polling loop can stop\.<\/span>/);
+});
+
+test("session URL uses the custom --host instead of localhost", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "lavish-serve-"));
+  const artifactPath = path.join(dir, "test.html");
+  await writeFile(artifactPath, "<h1>Host test</h1>");
+  const stateFile = path.join(dir, "state.json");
+  const host = "127.0.0.1";
+  const server = await serve({ port: 0, host, stateFile, version: "9.9.9-test" });
+  try {
+    const base = `http://${host}:${server.port}`;
+    const res = await fetch(`${base}/api/sessions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ file: artifactPath }),
+    });
+    const body = await res.json();
+    assert.equal(res.status, 200);
+    assert.match(body.url, /^http:\/\/127\.0\.0\.1:\d+\/session\//);
+    assert.doesNotMatch(body.url, /localhost/);
+  } finally {
+    await server.close();
+    await rm(dir, { recursive: true, force: true });
+  }
 });
