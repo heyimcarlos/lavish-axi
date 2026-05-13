@@ -1,3 +1,4 @@
+import http from "node:http";
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { access } from "node:fs/promises";
@@ -8,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import { AxiError, runAxiCli } from "axi-sdk-js";
 
 import { createDesignOutput, DESIGN_SYSTEM_HINT } from "./design-reference.js";
-import { createHttpBaseUrl } from "./network.js";
+import { createHttpBaseUrl, formatHttpRequestHost } from "./network.js";
 import { defaultPort, ensureStateDir, stateFile } from "./paths.js";
 import { findPlaybook, listPlaybooks, playbookIds } from "./playbooks.js";
 import { serve } from "./server.js";
@@ -164,11 +165,12 @@ async function openCommand(args) {
   }
   await assertHtmlFile(file);
   const absolute = await canonicalFile(file);
-  const baseUrl = await ensureServer({
+  const host = flagValue(args, "--host") || "127.0.0.1";
+  await ensureServer({
     forceRestart: shouldForceRestartForLocalBuild(process.argv[1] || ""),
-    host: flagValue(args, "--host") || "127.0.0.1",
+    host,
   });
-  const response = await postJson(`${baseUrl}/api/sessions`, { file: absolute });
+  const response = await postJson(host, defaultPort(), "/api/sessions", { file: absolute });
   if (shouldOpenBrowser(args, process.env)) {
     try {
       const open = (await import("open")).default;
@@ -181,7 +183,7 @@ async function openCommand(args) {
     file: absolute,
     url: response.url,
     status: response.status || "opened",
-    host: flagValue(args, "--host") || "127.0.0.1",
+    host,
   });
 }
 
@@ -195,15 +197,20 @@ async function pollCommand(args) {
     throw new AxiError("HTML file path is required", "VALIDATION_ERROR", ["Run `lavish-axi poll <html-file>`"]);
   }
   const absolute = await canonicalFile(file);
-  const baseUrl = await ensureServer({ host: flagValue(args, "--host") || "127.0.0.1" });
+  const host = flagValue(args, "--host") || "127.0.0.1";
+  await ensureServer({ host });
   const agentReply = flagValue(args, "--agent-reply");
   if (agentReply) {
-    await postJson(`${baseUrl}/api/${sessionKey(absolute)}/agent-reply`, { text: agentReply });
+    await postJson(host, defaultPort(), `/api/${sessionKey(absolute)}/agent-reply`, { text: agentReply });
   }
   const timeoutMs = flagValue(args, "--timeout-ms");
   const timeoutQuery = timeoutMs ? `&timeoutMs=${encodeURIComponent(timeoutMs)}` : "";
-  const response = await fetchJson(`${baseUrl}/api/poll?file=${encodeURIComponent(absolute)}${timeoutQuery}`);
-  return createPollOutput({ file: absolute, response, host: flagValue(args, "--host") || "127.0.0.1" });
+  const response = await fetchJson(
+    host,
+    defaultPort(),
+    `/api/poll?file=${encodeURIComponent(absolute)}${timeoutQuery}`,
+  );
+  return createPollOutput({ file: absolute, response, host });
 }
 
 export function createPollOutput({ file, response, host = "127.0.0.1" }) {
@@ -236,8 +243,9 @@ async function endCommand(args) {
     throw new AxiError("HTML file path is required", "VALIDATION_ERROR", ["Run `lavish-axi end <html-file>`"]);
   }
   const absolute = await canonicalFile(file);
-  const baseUrl = await ensureServer({ host: flagValue(args, "--host") || "127.0.0.1" });
-  const response = await postJson(`${baseUrl}/api/end`, { file: absolute });
+  const host = flagValue(args, "--host") || "127.0.0.1";
+  await ensureServer({ host });
+  const response = await postJson(host, defaultPort(), "/api/end", { file: absolute });
   return { session: { file: absolute, status: response.status || "ended" } };
 }
 
@@ -282,40 +290,40 @@ function isHtmlPath(file) {
 async function ensureServer({ forceRestart = false, host = "127.0.0.1" } = {}) {
   const port = defaultPort();
   const baseUrl = createHttpBaseUrl(host, port);
-  const existing = await fetchHealth(baseUrl);
+  const existing = await fetchHealth(host, port);
   if (existing && !shouldRestartServer(VERSION, existing, forceRestart) && shouldReuseServerForHost(host, existing)) {
     return baseUrl;
   }
   if (existing) {
     // Stale server from an older release is squatting on the port. Ask it to shut down
     // gracefully so the upgraded client doesn't keep handing users an old chrome.
-    await requestShutdown(baseUrl);
-    const freed = await waitForPortFree(baseUrl, 2000);
+    await requestShutdown(host, port);
+    const freed = await waitForPortFree(host, port, 2000);
     if (!freed) {
       // Pre-handshake servers (any release older than this change) don't expose /shutdown
       // so the POST 404'd. Fall back to SIGTERM by PID so the very first upgrade still
       // works, then keep waiting.
       if (shouldKillProcessOnPort(VERSION, existing)) {
         killProcessOnPort(port);
-        await waitForPortFree(baseUrl, 3000);
+        await waitForPortFree(host, port, 3000);
       }
     }
   }
   if (isWildcardBindHost(host)) {
     const conflictingServer = await findLavishServerOnPort(port);
     if (conflictingServer) {
-      await requestShutdown(conflictingServer.baseUrl);
-      const freed = await waitForPortFree(conflictingServer.baseUrl, 2000);
+      await requestShutdown(conflictingServer.host, port);
+      const freed = await waitForPortFree(conflictingServer.host, port, 2000);
       if (!freed) {
         killProcessOnPort(port);
-        await waitForPortFree(conflictingServer.baseUrl, 3000);
+        await waitForPortFree(conflictingServer.host, port, 3000);
       }
     }
   }
   await startServer(port, host);
   const deadline = Date.now() + 5000;
   while (Date.now() < deadline) {
-    const health = await fetchHealth(baseUrl);
+    const health = await fetchHealth(host, port);
     if (health && !shouldRestartServer(VERSION, health)) {
       return baseUrl;
     }
@@ -362,19 +370,17 @@ export function shouldReuseServerForHost(requestedHost, healthBody) {
   return typeof healthBody.host === "string" && healthBody.host.trim() === host;
 }
 
-async function fetchHealth(baseUrl) {
+async function fetchHealth(host, port) {
   try {
-    const response = await fetch(`${baseUrl}/health`);
-    if (!response.ok) return null;
-    return await response.json();
+    return await requestJson(host, port, "/health", { method: "GET" });
   } catch {
     return null;
   }
 }
 
-async function requestShutdown(baseUrl) {
+async function requestShutdown(host, port) {
   try {
-    await fetch(`${baseUrl}/shutdown`, { method: "POST" });
+    await requestJson(host, port, "/shutdown", { method: "POST" });
   } catch {
     // Best effort. If the server died before answering, the port will free up on its own.
   }
@@ -382,18 +388,18 @@ async function requestShutdown(baseUrl) {
 
 async function findLavishServerOnPort(port) {
   for (const listener of findListeningServersOnPort(port)) {
-    const health = await fetchHealth(listener.baseUrl);
+    const health = await fetchHealth(listener.host, port);
     if (health && health.app === "lavish-axi") {
-      return { baseUrl: listener.baseUrl, health };
+      return { host: listener.host, health };
     }
   }
   return null;
 }
 
-async function waitForPortFree(baseUrl, timeoutMs) {
+async function waitForPortFree(host, port, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if (!(await fetchHealth(baseUrl))) return true;
+    if (!(await fetchHealth(host, port))) return true;
     await delay(100);
   }
   return false;
@@ -437,7 +443,7 @@ function findListeningServersOnPort(port) {
       if (!line.startsWith("n")) continue;
       const host = parseListeningHost(line.slice(1));
       if (host) {
-        listeners.push({ pid, baseUrl: createHttpBaseUrl(host, port) });
+        listeners.push({ pid, host });
       }
     }
     return listeners;
@@ -507,24 +513,59 @@ export function createServerSpawnOptions() {
   };
 }
 
-async function fetchJson(url) {
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new AxiError(`Lavish Editor request failed: ${response.status}`, "SERVER_ERROR");
-  }
-  return response.json();
+async function fetchJson(host, port, path) {
+  return requestJson(host, port, path, { method: "GET" });
 }
 
-async function postJson(url, body) {
-  const response = await fetch(url, {
+async function postJson(host, port, path, body) {
+  return requestJson(host, port, path, {
     method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
+    body,
   });
-  if (!response.ok) {
-    throw new AxiError(`Lavish Editor request failed: ${response.status}`, "SERVER_ERROR");
-  }
-  return response.json();
+}
+
+function requestJson(host, port, path, { method = "GET", body } = {}) {
+  const hostname = formatHttpRequestHost(host);
+  const payload = body === undefined ? null : JSON.stringify(body);
+  return new Promise((resolve, reject) => {
+    const req = http.request(
+      {
+        hostname,
+        port,
+        path,
+        method,
+        headers: payload
+          ? {
+              "content-type": "application/json",
+              "content-length": Buffer.byteLength(payload),
+            }
+          : undefined,
+      },
+      (res) => {
+        let data = "";
+        res.setEncoding("utf8");
+        res.on("data", (chunk) => {
+          data += chunk;
+        });
+        res.on("end", () => {
+          if (res.statusCode < 200 || res.statusCode >= 300) {
+            reject(new AxiError(`Lavish Editor request failed: ${res.statusCode}`, "SERVER_ERROR"));
+            return;
+          }
+          try {
+            resolve(data ? JSON.parse(data) : {});
+          } catch {
+            reject(new AxiError("Lavish Editor request failed: invalid JSON", "SERVER_ERROR"));
+          }
+        });
+      },
+    );
+    req.on("error", reject);
+    if (payload) {
+      req.write(payload);
+    }
+    req.end();
+  });
 }
 
 function flagValue(args, flag) {
