@@ -37,6 +37,7 @@ export async function serve({ port, host = "127.0.0.1", stateFile, version = "" 
   const watchers = new Map();
   const activePolls = new Map();
   const sseClients = new Set();
+  let listeningPort = port;
 
   app.use(express.json({ limit: "2mb" }));
 
@@ -59,7 +60,7 @@ export async function serve({ port, host = "127.0.0.1", stateFile, version = "" 
     try {
       const file = await canonicalFile(req.body.file);
       const key = sessionKey(file);
-      const url = `${createHttpBaseUrl(host, port)}/session/${key}`;
+      const url = `${createHttpBaseUrl(host, listeningPort)}/session/${key}`;
       const session = await store.upsertSession(file, url);
       watchSession(session, watchers, events);
       res.json({ key, file, url, status: "opened" });
@@ -296,6 +297,7 @@ export async function serve({ port, host = "127.0.0.1", stateFile, version = "" 
   const httpServer = await new Promise((resolve) => {
     const s = app.listen(port, host, () => resolve(s));
   });
+  listeningPort = httpServer.address().port;
 
   let shuttingDown = false;
   function shutdown() {

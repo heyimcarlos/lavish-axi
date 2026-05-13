@@ -606,7 +606,7 @@ function flagValue(args, flag) {
 
 function commandHostArg(host) {
   const value = String(host || "").trim();
-  if (value === "" || value === "127.0.0.1" || value === "localhost") {
+  if (value === "" || value === "127.0.0.1") {
     return "";
   }
   return ` --host ${value}`;
