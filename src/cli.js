@@ -148,10 +148,11 @@ export function createPlaybookOutput(args) {
   return { playbook };
 }
 
-export function createOpenOutput({ file, url, status }) {
+export function createOpenOutput({ file, url, status, host = "127.0.0.1" }) {
+  const hostArg = commandHostArg(host);
   return {
     session: { file, url, status },
-    next_step: `Tell the user to open ${url} to review the artifact in Lavish Editor, then run \`lavish-axi poll ${file}\`. This command long-polls until the user sends feedback or ends the session. Do not pass --timeout-ms during normal agent use. Do not set a short shell timeout; either run it without a timeout or set the shell timeout above 10 minutes. After applying feedback, run \`lavish-axi poll ${file} --agent-reply "<message for the user>"\` without --timeout-ms to show your response in Lavish Editor and wait for more feedback.`,
+    next_step: `Tell the user to open ${url} to review the artifact in Lavish Editor, then run \`lavish-axi poll ${file}${hostArg}\`. This command long-polls until the user sends feedback or ends the session. Do not pass --timeout-ms during normal agent use. Do not set a short shell timeout; either run it without a timeout or set the shell timeout above 10 minutes. After applying feedback, run \`lavish-axi poll ${file}${hostArg} --agent-reply "<message for the user>"\` without --timeout-ms to show your response in Lavish Editor and wait for more feedback.`,
   };
 }
 
@@ -175,7 +176,12 @@ async function openCommand(args) {
       response.status = "ready";
     }
   }
-  return createOpenOutput({ file: absolute, url: response.url, status: response.status || "opened" });
+  return createOpenOutput({
+    file: absolute,
+    url: response.url,
+    status: response.status || "opened",
+    host: flagValue(args, "--host") || "127.0.0.1",
+  });
 }
 
 export function shouldOpenBrowser(args, env) {
@@ -196,10 +202,11 @@ async function pollCommand(args) {
   const timeoutMs = flagValue(args, "--timeout-ms");
   const timeoutQuery = timeoutMs ? `&timeoutMs=${encodeURIComponent(timeoutMs)}` : "";
   const response = await fetchJson(`${baseUrl}/api/poll?file=${encodeURIComponent(absolute)}${timeoutQuery}`);
-  return createPollOutput({ file: absolute, response });
+  return createPollOutput({ file: absolute, response, host: flagValue(args, "--host") || "127.0.0.1" });
 }
 
-export function createPollOutput({ file, response }) {
+export function createPollOutput({ file, response, host = "127.0.0.1" }) {
+  const hostArg = commandHostArg(host);
   if (response.status === "missing") {
     throw new AxiError("No active Lavish Editor session for this file", "NOT_FOUND", [
       `Run \`lavish-axi ${file}\` first`,
@@ -210,7 +217,7 @@ export function createPollOutput({ file, response }) {
       session: { file, status: "feedback" },
       dom_snapshot: response.dom_snapshot || "",
       prompts: response.prompts || [],
-      next_step: `Apply the requested changes to ${file}, then run \`lavish-axi poll ${file} --agent-reply "<message for the user>"\` without --timeout-ms unless the user ended the session. The poll command waits until the user sends more feedback or ends the session; do not set a short shell timeout, or set the shell timeout above 10 minutes.`,
+      next_step: `Apply the requested changes to ${file}, then run \`lavish-axi poll ${file}${hostArg} --agent-reply "<message for the user>"\` without --timeout-ms unless the user ended the session. The poll command waits until the user sends more feedback or ends the session; do not set a short shell timeout, or set the shell timeout above 10 minutes.`,
     };
   }
   if (response.status === "ended") {
@@ -218,7 +225,7 @@ export function createPollOutput({ file, response }) {
   }
   return {
     session: { file, status: response.status || "waiting" },
-    next_step: `No user feedback arrived before the optional timeout. Run \`lavish-axi poll ${file}\` without --timeout-ms to wait indefinitely.`,
+    next_step: `No user feedback arrived before the optional timeout. Run \`lavish-axi poll ${file}${hostArg}\` without --timeout-ms to wait indefinitely.`,
   };
 }
 
@@ -275,7 +282,7 @@ async function ensureServer({ forceRestart = false, host = "127.0.0.1" } = {}) {
   const port = defaultPort();
   const baseUrl = createHttpBaseUrl(host, port);
   const existing = await fetchHealth(baseUrl);
-  if (existing && !shouldRestartServer(VERSION, existing, forceRestart)) {
+  if (existing && !shouldRestartServer(VERSION, existing, forceRestart) && shouldReuseServerForHost(host, existing)) {
     return baseUrl;
   }
   if (existing) {
@@ -332,6 +339,15 @@ export function shouldKillProcessOnPort(currentVersion, healthBody) {
   if (typeof healthBody.version !== "string" || healthBody.version === "") return true;
   if (healthBody.app !== "lavish-axi") return false;
   return healthBody.version !== currentVersion;
+}
+
+export function shouldReuseServerForHost(requestedHost, healthBody) {
+  if (!healthBody || typeof healthBody !== "object") return false;
+  const host = String(requestedHost || "").trim() || "127.0.0.1";
+  if (host === "127.0.0.1" || host === "localhost") {
+    return true;
+  }
+  return typeof healthBody.host === "string" && healthBody.host.trim() === host;
 }
 
 async function fetchHealth(baseUrl) {
@@ -439,6 +455,14 @@ function flagValue(args, flag) {
     return null;
   }
   return args[index + 1] || null;
+}
+
+function commandHostArg(host) {
+  const value = String(host || "").trim();
+  if (value === "" || value === "127.0.0.1" || value === "localhost") {
+    return "";
+  }
+  return ` --host ${value}`;
 }
 
 export function fileArg(args) {

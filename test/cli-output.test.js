@@ -22,6 +22,7 @@ import {
   resolveServerEntry,
   shouldForceRestartForLocalBuild,
   shouldKillProcessOnPort,
+  shouldReuseServerForHost,
   shouldOpenBrowser,
   shouldRestartServer,
   telemetryCommandName,
@@ -191,6 +192,18 @@ test("open output uses one next_step string for user URL and polling", () => {
   assert.match(output.next_step, /Do not pass --timeout-ms/);
 });
 
+test("open output carries non-default host through follow-up commands", () => {
+  const output = createOpenOutput({
+    file: "/tmp/artifact.html",
+    host: "0.0.0.0",
+    url: "http://localhost:4387/session/abc123",
+    status: "opened",
+  });
+
+  assert.match(output.next_step, /lavish-axi poll \/tmp\/artifact\.html --host 0\.0\.0\.0/);
+  assert.match(output.next_step, /lavish-axi poll \/tmp\/artifact\.html --host 0\.0\.0\.0 --agent-reply/);
+});
+
 test("poll help warns agents not to use short shell timeouts", () => {
   const help = getCommandHelp("poll");
 
@@ -209,6 +222,16 @@ test("feedback next step tells agents to keep polling without timeout flag", () 
 
   assert.match(output.next_step, /without --timeout-ms/);
   assert.match(output.next_step, /above 10 minutes/);
+});
+
+test("poll output carries non-default host through follow-up commands", () => {
+  const output = createPollOutput({
+    file: "/tmp/report.html",
+    host: "0.0.0.0",
+    response: { status: "feedback", dom_snapshot: "", prompts: [] },
+  });
+
+  assert.match(output.next_step, /lavish-axi poll \/tmp\/report\.html --host 0\.0\.0\.0 --agent-reply/);
 });
 
 test("html file arguments normalize to the hidden open command", () => {
@@ -343,4 +366,11 @@ test("wildcard host URLs normalize to localhost", () => {
   assert.equal(createHttpBaseUrl("::", 4387), "http://localhost:4387");
   assert.equal(createHttpBaseUrl("127.0.0.1", 4387), "http://127.0.0.1:4387");
   assert.equal(createHttpBaseUrl("::1", 4387), "http://[::1]:4387");
+});
+
+test("server reuse respects explicit bind hosts", () => {
+  assert.equal(shouldReuseServerForHost("127.0.0.1", { host: "127.0.0.1" }), true);
+  assert.equal(shouldReuseServerForHost("0.0.0.0", { host: "0.0.0.0" }), true);
+  assert.equal(shouldReuseServerForHost("0.0.0.0", { host: "127.0.0.1" }), false);
+  assert.equal(shouldReuseServerForHost("100.64.0.1", { host: "100.64.0.2" }), false);
 });
