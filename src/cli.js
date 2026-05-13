@@ -300,6 +300,17 @@ async function ensureServer({ forceRestart = false, host = "127.0.0.1" } = {}) {
       }
     }
   }
+  if (isWildcardBindHost(host)) {
+    const conflictingServer = await findLavishServerOnPort(port);
+    if (conflictingServer) {
+      await requestShutdown(conflictingServer.baseUrl);
+      const freed = await waitForPortFree(conflictingServer.baseUrl, 2000);
+      if (!freed) {
+        killProcessOnPort(port);
+        await waitForPortFree(conflictingServer.baseUrl, 3000);
+      }
+    }
+  }
   await startServer(port, host);
   const deadline = Date.now() + 5000;
   while (Date.now() < deadline) {
@@ -368,6 +379,16 @@ async function requestShutdown(baseUrl) {
   }
 }
 
+async function findLavishServerOnPort(port) {
+  for (const listener of findListeningServersOnPort(port)) {
+    const health = await fetchHealth(listener.baseUrl);
+    if (health && health.app === "lavish-axi") {
+      return { baseUrl: listener.baseUrl, health };
+    }
+  }
+  return null;
+}
+
 async function waitForPortFree(baseUrl, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -398,6 +419,59 @@ function killProcessOnPort(port) {
   } catch {
     // lsof missing or unsupported platform - the outer caller will surface SERVER_ERROR.
   }
+}
+
+function findListeningServersOnPort(port) {
+  try {
+    const result = spawnSync("lsof", ["-nP", "-iTCP:" + port, "-sTCP:LISTEN", "-Fpn"], { encoding: "utf8" });
+    if (result.status !== 0 || !result.stdout) return [];
+    const listeners = [];
+    let pid = null;
+    for (const line of result.stdout.split("\n")) {
+      if (!line) continue;
+      if (line.startsWith("p")) {
+        pid = Number(line.slice(1));
+        continue;
+      }
+      if (!line.startsWith("n")) continue;
+      const host = parseListeningHost(line.slice(1));
+      if (host) {
+        listeners.push({ pid, baseUrl: createHttpBaseUrl(host, port) });
+      }
+    }
+    return listeners;
+  } catch {
+    return [];
+  }
+}
+
+function parseListeningHost(listeningName) {
+  const value = String(listeningName || "").trim().replace(/^TCP\s+/i, "").replace(/\s+\(LISTEN\)$/i, "");
+  const separator = value.lastIndexOf(":");
+  if (separator === -1) {
+    return null;
+  }
+  const host = value.slice(0, separator).trim();
+  return normalizeListeningHost(host);
+}
+
+function normalizeListeningHost(host) {
+  const value = String(host || "").trim();
+  if (value === "" || value === "*") {
+    return "0.0.0.0";
+  }
+  if (value.startsWith("[") && value.endsWith("]")) {
+    return value.slice(1, -1);
+  }
+  if (value === "0.0.0.0" || value === "::") {
+    return "0.0.0.0";
+  }
+  return value;
+}
+
+function isWildcardBindHost(host) {
+  const value = String(host || "").trim();
+  return value === "0.0.0.0" || value === "::";
 }
 
 async function startServer(port, host = "127.0.0.1") {
