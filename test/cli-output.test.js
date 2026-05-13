@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
@@ -29,6 +29,7 @@ import {
   VERSION,
 } from "../src/cli.js";
 import { createHttpBaseUrl } from "../src/network.js";
+import { serve } from "../src/server.js";
 
 test("CLI version tracks package.json so release-please bumps reach the published binary", async () => {
   const packageJson = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
@@ -377,3 +378,70 @@ test("server reuse respects explicit bind hosts", () => {
   assert.equal(shouldReuseServerForHost("0.0.0.0", { host: "127.0.0.1" }), false);
   assert.equal(shouldReuseServerForHost("100.64.0.1", { host: "100.64.0.2" }), false);
 });
+
+const wildcardBindHost = firstNonInternalIpv4();
+(wildcardBindHost ? test : test.skip)(
+  "open switches a port from a specific interface to a wildcard bind",
+  async () => {
+    const dir = await mkdtemp(`${os.tmpdir()}/lavish-axi-bind-test-`);
+    const artifactPath = `${dir}/artifact.html`;
+    const stateFile = `${dir}/state.json`;
+    await writeFile(artifactPath, "<h1>Host switch test</h1>");
+    const server = await serve({ port: 0, host: wildcardBindHost, stateFile, version: "9.9.9-test" });
+    const port = server.port;
+    try {
+      const child = spawn(
+        process.execPath,
+        [fileURLToPath(new URL("../bin/lavish-axi.js", import.meta.url)), "open", artifactPath, "--host", "0.0.0.0", "--no-open"],
+        {
+          cwd: fileURLToPath(new URL("..", import.meta.url)),
+          env: {
+            ...process.env,
+            LAVISH_AXI_PORT: String(port),
+            LAVISH_AXI_STATE_DIR: dir,
+          },
+          stdio: ["ignore", "pipe", "pipe"],
+        },
+      );
+      const [status, stdout, stderr] = await Promise.all([
+        new Promise((resolve, reject) => {
+          child.once("error", reject);
+          child.once("close", resolve);
+        }),
+        streamToString(child.stdout),
+        streamToString(child.stderr),
+      ]);
+
+      assert.equal(status, 0, stderr);
+      assert.match(stdout, /status: (opened|ready)/);
+      const health = await (await fetch(`http://${wildcardBindHost}:${port}/health`)).json();
+      assert.equal(health.host, "0.0.0.0");
+    } finally {
+      await server.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  },
+);
+
+function firstNonInternalIpv4() {
+  for (const addresses of Object.values(os.networkInterfaces())) {
+    for (const address of addresses || []) {
+      if (address && address.family === "IPv4" && !address.internal) {
+        return address.address;
+      }
+    }
+  }
+  return null;
+}
+
+function streamToString(stream) {
+  return new Promise((resolve, reject) => {
+    let data = "";
+    stream.setEncoding("utf8");
+    stream.on("data", (chunk) => {
+      data += chunk;
+    });
+    stream.once("end", () => resolve(data));
+    stream.once("error", reject);
+  });
+}
