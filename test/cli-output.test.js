@@ -28,7 +28,7 @@ import {
   telemetryCommandName,
   VERSION,
 } from "../src/cli.js";
-import { createHttpBaseUrl } from "../src/network.js";
+import { createHttpBaseUrl, formatHttpHost, formatHttpRequestHost } from "../src/network.js";
 import { serve } from "../src/server.js";
 
 test("CLI version tracks package.json so release-please bumps reach the published binary", async () => {
@@ -367,6 +367,18 @@ test("wildcard host URLs normalize to localhost", () => {
   assert.equal(createHttpBaseUrl("::", 4387), "http://localhost:4387");
   assert.equal(createHttpBaseUrl("127.0.0.1", 4387), "http://127.0.0.1:4387");
   assert.equal(createHttpBaseUrl("::1", 4387), "http://[::1]:4387");
+});
+
+test("scoped IPv6 hosts encode zone identifiers for URLs", () => {
+  assert.equal(formatHttpHost("fe80::1%en0"), "[fe80::1%25en0]");
+  assert.equal(formatHttpHost("[fe80::1%en0]"), "[fe80::1%25en0]");
+  assert.equal(createHttpBaseUrl("fe80::1%en0", 4387), "http://[fe80::1%25en0]:4387");
+});
+
+test("scoped IPv6 hosts stay raw for client requests", () => {
+  assert.equal(formatHttpRequestHost("fe80::1%en0"), "fe80::1%en0");
+  assert.equal(formatHttpRequestHost("[fe80::1%en0]"), "fe80::1%en0");
+  assert.equal(formatHttpRequestHost("[fe80::1%25en0]"), "fe80::1%en0");
 });
 
 test("server reuse respects explicit bind hosts", () => {
