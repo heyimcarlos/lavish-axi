@@ -436,6 +436,7 @@ test("/health reports the server version so clients can detect upgrades", async 
     const res = await fetch(`http://127.0.0.1:${server.port}/health`);
     const body = await res.json();
     assert.equal(body.ok, true);
+    assert.equal(body.host, "127.0.0.1");
     assert.equal(body.version, "9.9.9-test");
   } finally {
     await server.close();
@@ -571,6 +572,8 @@ test("wildcard bind hosts advertise localhost session URLs", async () => {
     assert.equal(res.status, 200);
     assert.match(body.url, /^http:\/\/localhost:\d+\/session\//);
     assert.doesNotMatch(body.url, /0\.0\.0\.0/);
+    const health = await (await fetch(`http://127.0.0.1:${server.port}/health`)).json();
+    assert.equal(health.host, "0.0.0.0");
   } finally {
     await server.close();
     await rm(dir, { recursive: true, force: true });
