@@ -155,13 +155,16 @@ export function createOpenOutput({ file, url, status }) {
 }
 
 async function openCommand(args) {
-  const file = args.find((arg) => !arg.startsWith("-"));
+  const file = fileArg(args);
   if (!file) {
     throw new AxiError("HTML file path is required", "VALIDATION_ERROR", ["Run `lavish-axi <html-file>`"]);
   }
   await assertHtmlFile(file);
   const absolute = await canonicalFile(file);
-  const baseUrl = await ensureServer({ forceRestart: shouldForceRestartForLocalBuild(process.argv[1] || "") });
+  const baseUrl = await ensureServer({
+    forceRestart: shouldForceRestartForLocalBuild(process.argv[1] || ""),
+    host: flagValue(args, "--host") || "127.0.0.1",
+  });
   const response = await postJson(`${baseUrl}/api/sessions`, { file: absolute });
   if (shouldOpenBrowser(args, process.env)) {
     try {
@@ -179,12 +182,12 @@ export function shouldOpenBrowser(args, env) {
 }
 
 async function pollCommand(args) {
-  const file = args[0];
+  const file = fileArg(args);
   if (!file) {
     throw new AxiError("HTML file path is required", "VALIDATION_ERROR", ["Run `lavish-axi poll <html-file>`"]);
   }
   const absolute = await canonicalFile(file);
-  const baseUrl = await ensureServer();
+  const baseUrl = await ensureServer({ host: flagValue(args, "--host") || "127.0.0.1" });
   const agentReply = flagValue(args, "--agent-reply");
   if (agentReply) {
     await postJson(`${baseUrl}/api/${sessionKey(absolute)}/agent-reply`, { text: agentReply });
@@ -219,12 +222,12 @@ export function createPollOutput({ file, response }) {
 }
 
 async function endCommand(args) {
-  const file = args[0];
+  const file = fileArg(args);
   if (!file) {
     throw new AxiError("HTML file path is required", "VALIDATION_ERROR", ["Run `lavish-axi end <html-file>`"]);
   }
   const absolute = await canonicalFile(file);
-  const baseUrl = await ensureServer();
+  const baseUrl = await ensureServer({ host: flagValue(args, "--host") || "127.0.0.1" });
   const response = await postJson(`${baseUrl}/api/end`, { file: absolute });
   return { session: { file: absolute, status: response.status || "ended" } };
 }
@@ -239,7 +242,8 @@ async function designCommand() {
 
 async function serverCommand(args) {
   const port = Number(flagValue(args, "--port") || defaultPort());
-  const server = await serve({ port, stateFile: stateFile(), version: VERSION });
+  const host = flagValue(args, "--host") || "127.0.0.1";
+  const server = await serve({ port, host, stateFile: stateFile(), version: VERSION });
   await server.done;
   return "";
 }
@@ -266,9 +270,9 @@ function isHtmlPath(file) {
   return file.toLowerCase().endsWith(".html") || file.toLowerCase().endsWith(".htm");
 }
 
-async function ensureServer({ forceRestart = false } = {}) {
+async function ensureServer({ forceRestart = false, host = "127.0.0.1" } = {}) {
   const port = defaultPort();
-  const baseUrl = `http://localhost:${port}`;
+  const baseUrl = `http://${host}:${port}`;
   const existing = await fetchHealth(baseUrl);
   if (existing && !shouldRestartServer(VERSION, existing, forceRestart)) {
     return baseUrl;
@@ -288,7 +292,7 @@ async function ensureServer({ forceRestart = false } = {}) {
       }
     }
   }
-  await startServer(port);
+  await startServer(port, host);
   const deadline = Date.now() + 5000;
   while (Date.now() < deadline) {
     const health = await fetchHealth(baseUrl);
@@ -379,10 +383,10 @@ function killProcessOnPort(port) {
   }
 }
 
-async function startServer(port) {
+async function startServer(port, host = "127.0.0.1") {
   await ensureStateDir();
   const entry = resolveServerEntry();
-  const child = spawn(process.execPath, [entry, "server", "--port", String(port)], {
+  const child = spawn(process.execPath, [entry, "server", "--port", String(port), "--host", host], {
     detached: true,
     stdio: "ignore",
     env: { ...process.env, LAVISH_AXI_NO_OPEN: "1" },
@@ -434,6 +438,15 @@ function flagValue(args, flag) {
     return null;
   }
   return args[index + 1] || null;
+}
+
+export function fileArg(args) {
+  const consumed = new Set();
+  for (const flag of ["--host", "--agent-reply", "--timeout-ms", "--port"]) {
+    const val = flagValue(args, flag);
+    if (val !== null) consumed.add(val);
+  }
+  return args.find((arg) => !arg.startsWith("-") && !consumed.has(arg));
 }
 
 function delay(ms) {
