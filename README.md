@@ -105,9 +105,9 @@ pnpm link
 | Command                       | Description                                                  |
 | ----------------------------- | ------------------------------------------------------------ |
 | `lavish-axi`                  | Show current sessions and usage guidance.                    |
-| `lavish-axi <html-file>`      | Open or resume a Lavish Editor session.                      |
-| `lavish-axi poll <html-file>` | Long-poll until the user sends feedback or ends the session. |
-| `lavish-axi end <html-file>`  | End a session.                                               |
+| `lavish-axi <html-file>`      | Open or resume a session on the configured server.          |
+| `lavish-axi poll <html-file>` | Long-poll the configured server for feedback.               |
+| `lavish-axi end <html-file>`  | End a session on the configured server.                     |
 | `lavish-axi server`           | Run the background server manually.                          |
 | `lavish-axi playbook [id]`    | List focused artifact guidance or show one playbook.         |
 | `lavish-axi design`           | Show the injected Tailwind CSS and DaisyUI design reference. |
@@ -119,10 +119,13 @@ Known playbook IDs: `diagram`, `table`, `comparison`, `plan`, `diff`, `input`, `
 | Command                                        | Flag                  | Description                                                               |
 | ---------------------------------------------- | --------------------- | ------------------------------------------------------------------------- |
 | `lavish-axi <html-file>`                       | `--no-open`           | Ensure the server/session exists without opening another browser window.  |
-| `lavish-axi <html-file> / poll / end / server` | `--host <host>`       | Bind the server to another interface; defaults to `127.0.0.1`.            |
+| `lavish-axi <html-file> / poll / end`          | `--host <host>`       | Target a server on another host; reuse the same host for follow-up calls. |
 | `lavish-axi server`                            | `--port <port>`       | Override the server port; defaults to `4387`.                             |
+| `lavish-axi server`                            | `--host <host>`       | Bind the background server to another host; defaults to `127.0.0.1`.     |
 | `lavish-axi poll`                              | `--agent-reply "..."` | Show the agent's reply in the existing browser chat before polling again. |
 | `lavish-axi poll`                              | `--timeout-ms <ms>`   | Test/debug escape hatch only; agents should normally omit it.             |
+
+When you open a session against a non-default host, pass the same `--host` to later `poll` and `end` commands so they reach the same server.
 
 ## Development
 
