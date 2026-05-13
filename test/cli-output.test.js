@@ -408,8 +408,11 @@ test("scoped IPv6 hosts stay raw for client requests", () => {
 
 test("server reuse respects explicit bind hosts", () => {
   assert.equal(shouldReuseServerForHost("127.0.0.1", { host: "127.0.0.1" }), true);
+  assert.equal(shouldReuseServerForHost("localhost", { host: "127.0.0.1" }), true);
+  assert.equal(shouldReuseServerForHost("::1", { host: "localhost" }), true);
   assert.equal(shouldReuseServerForHost("0.0.0.0", { host: "0.0.0.0" }), true);
-  assert.equal(shouldReuseServerForHost("0.0.0.0", { host: "127.0.0.1" }), true);
+  assert.equal(shouldReuseServerForHost("0.0.0.0", { host: "127.0.0.1" }), false);
+  assert.equal(shouldReuseServerForHost("::", { host: "::1" }), false);
   assert.equal(shouldReuseServerForHost("203.0.113.10", { host: "0.0.0.0" }), true);
   assert.equal(shouldReuseServerForHost("203.0.113.10", { host: "::" }), true);
   assert.equal(shouldReuseServerForHost("203.0.113.10", { host: "203.0.113.11" }), false);
