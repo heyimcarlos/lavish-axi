@@ -294,6 +294,11 @@ async function ensureServer({ forceRestart = false, host = "127.0.0.1" } = {}) {
   if (existing && !shouldRestartServer(VERSION, existing, forceRestart) && shouldReuseServerForHost(host, existing)) {
     return baseUrl;
   }
+  if (!isLocalServerHost(host)) {
+    throw new AxiError("Lavish Editor server is not running", "SERVER_ERROR", [
+      `Run \`lavish-axi server --host ${host} --port ${port}\` on that host first`,
+    ]);
+  }
   if (existing) {
     // Stale server from an older release is squatting on the port. Ask it to shut down
     // gracefully so the upgraded client doesn't keep handing users an old chrome.
@@ -362,10 +367,26 @@ export function shouldKillProcessOnPort(currentVersion, healthBody) {
 export function shouldReuseServerForHost(requestedHost, healthBody) {
   if (!healthBody || typeof healthBody !== "object") return false;
   const host = String(requestedHost || "").trim() || "127.0.0.1";
-  if (host === "127.0.0.1" || host === "localhost") {
+  const listenerHost = String(healthBody.host || "").trim();
+  if (!listenerHost) return false;
+  if (host === listenerHost) {
     return true;
   }
-  return typeof healthBody.host === "string" && healthBody.host.trim() === host;
+  if (isWildcardHost(listenerHost)) {
+    return true;
+  }
+  if (isWildcardHost(host) && isLoopbackHost(listenerHost)) {
+    return true;
+  }
+  return false;
+}
+
+export function isLocalServerHost(requestedHost) {
+  const host = String(requestedHost || "").trim() || "127.0.0.1";
+  if (isLoopbackHost(host) || isWildcardHost(host)) {
+    return true;
+  }
+  return localProbeHosts().includes(host);
 }
 
 async function fetchHealth(host, port) {
@@ -420,6 +441,14 @@ function localProbeHosts() {
     }
   }
   return [...new Set(hosts)];
+}
+
+function isWildcardHost(host) {
+  return host === "0.0.0.0" || host === "::";
+}
+
+function isLoopbackHost(host) {
+  return host === "localhost" || host === "::1" || host.startsWith("127.");
 }
 
 async function waitForPortFree(host, port, timeoutMs) {
