@@ -125,6 +125,8 @@ export function createHomeOutput({ bin, sessions, includeSessions = true }) {
       "Run `lavish-axi poll <html-file> [--host <host>]` to wait for user feedback",
       "Run `lavish-axi end <html-file> [--host <host>]` to end a session",
       "Run `lavish-axi server [--host <host>] [--port 4387]` to run the background server manually",
+      "When using a non-default host, pass the same `--host` to follow-up `poll` and `end` calls",
+      "Binding beyond loopback exposes only browser-facing routes to the network; file/system API calls must originate on the server machine",
       "Run `lavish-axi playbook <playbook_id>` for focused artifact guidance",
       DESIGN_SYSTEM_HINT,
       "Use lavish-axi when the user asks for a visual artifact, HTML explainer, interactive prototype, review surface, technical plan, comparison, report, or browser-based feedback loop",
@@ -662,15 +664,15 @@ export function getCommandHelp(command) {
   return COMMAND_HELP[command] || null;
 }
 
-const TOP_LEVEL_HELP = `lavish-axi - Lavish Editor AXI\n\nUsage:\n  lavish-axi\n  lavish-axi <html-file> [--host <host>]\n  lavish-axi poll <html-file> [--host <host>] [--agent-reply "..."]\n  lavish-axi end <html-file> [--host <host>]\n  lavish-axi playbook [playbook_id]\n  lavish-axi design\n  lavish-axi server [--host <host>] [--port 4387]\n\n${DESIGN_SYSTEM_HINT}\n\nNote: poll long-polls indefinitely by default until the user sends feedback or ends the session. Do not pass --timeout-ms during normal agent use; it is for tests and debugging only. do not set a short shell timeout; either run it without a timeout or use a very high threshold above 10 minutes.\n\n`;
+const TOP_LEVEL_HELP = `lavish-axi - Lavish Editor AXI\n\nUsage:\n  lavish-axi\n  lavish-axi <html-file> [--host <host>]\n  lavish-axi poll <html-file> [--host <host>] [--agent-reply "..."]\n  lavish-axi end <html-file> [--host <host>]\n  lavish-axi playbook [playbook_id]\n  lavish-axi design\n  lavish-axi server [--host <host>] [--port 4387]\n\n${DESIGN_SYSTEM_HINT}\n\nHost: the server defaults to 127.0.0.1. When using a non-default host, pass the same --host to follow-up poll and end commands. Binding beyond loopback exposes only browser-facing routes to the network; file/system API calls must originate on the server machine.\n\nNote: poll long-polls indefinitely by default until the user sends feedback or ends the session. Do not pass --timeout-ms during normal agent use; it is for tests and debugging only. do not set a short shell timeout; either run it without a timeout or use a very high threshold above 10 minutes.\n\n`;
 
 const COMMAND_HELP = {
-  open: `Usage: lavish-axi <html-file> [--host <host>] [--no-open]\n\nOpen or resume a Lavish Editor review session for an HTML artifact. Use --no-open when you need to ensure the server/session exists without opening another browser window.\n`,
-  poll: `Usage: lavish-axi poll <html-file> [--host <host>] [--agent-reply "..."]\n\nThis command long-polls indefinitely for queued user prompts, then returns them to the agent. Do not pass --timeout-ms during normal agent use; it is for tests and debugging only. do not set a short shell timeout; either run it without a timeout or use a very high threshold above 10 minutes so the user has time to review and send feedback. Use --agent-reply after applying prior feedback to display your response in Lavish Editor before waiting again.\n`,
-  end: `Usage: lavish-axi end <html-file> [--host <host>]\n\nEnd a Lavish Editor session.\n`,
+  open: `Usage: lavish-axi <html-file> [--host <host>] [--no-open]\n\nOpen or resume a Lavish Editor review session for an HTML artifact. Use --no-open when you need to ensure the server/session exists without opening another browser window. When using a non-default host, pass the same --host to follow-up poll and end commands.\n`,
+  poll: `Usage: lavish-axi poll <html-file> [--host <host>] [--agent-reply "..."]\n\nThis command long-polls indefinitely for queued user prompts, then returns them to the agent. Use the same --host that opened the session. Do not pass --timeout-ms during normal agent use; it is for tests and debugging only. do not set a short shell timeout; either run it without a timeout or use a very high threshold above 10 minutes so the user has time to review and send feedback. Use --agent-reply after applying prior feedback to display your response in Lavish Editor before waiting again.\n`,
+  end: `Usage: lavish-axi end <html-file> [--host <host>]\n\nEnd a Lavish Editor session. Use the same --host that opened the session.\n`,
   playbook: `Usage: lavish-axi playbook [playbook_id]\n\nList focused artifact guidance playbooks, or show one playbook by ID. Known IDs: diagram, table, comparison, plan, diff, input, slides.\n\nExamples:\n  lavish-axi playbook\n  lavish-axi playbook diagram\n  lavish-axi playbook input\n`,
   design: `Usage: lavish-axi design\n\nShow technical reference for the Tailwind CSS browser runtime v4, DaisyUI v5 components, and DaisyUI themes that Lavish auto-injects into artifacts. Do not add these libraries separately.\n`,
-  server: `Usage: lavish-axi server [--host <host>] [--port 4387]\n\nRun the Lavish Editor server.\n`,
+  server: `Usage: lavish-axi server [--host <host>] [--port 4387]\n\nRun the Lavish Editor server. Binding beyond loopback exposes only browser-facing routes to the network; file/system API calls must originate on the server machine.\n`,
 };
 
 export { createDesignOutput };
