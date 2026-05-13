@@ -36,6 +36,7 @@ The CLI (`bin/lavish-axi.js` -> `src/cli.js`) is the user-facing entry point.
 The first command that needs the server spawns `lavish-axi server` as a **detached** background process (`src/cli.js:startServer`) and waits for `/health`, which returns `{ ok, app, host, version }`.
 Subsequent CLI invocations reuse the running server only when its health version matches the current CLI version and the bind host is compatible; stale servers are asked to `POST /shutdown`, and pre-handshake servers may be SIGTERM'd by port PID before the upgraded server is spawned.
 The server defaults to binding `127.0.0.1` and port 4387 (`LAVISH_AXI_PORT`).
+When bound beyond loopback, browser-facing routes can be reached from the network, but file/system routes (`/api/sessions`, `/api/poll`, `/api/:key/agent-reply`, `/api/end`, `/shutdown`) only accept local requests from the server machine.
 
 State lives at `~/.lavish-axi/state.json` (override with `LAVISH_AXI_STATE_DIR`). All sessions across all projects share this one file, keyed by a sha256 prefix of the canonicalized file path - so the CLI never needs opaque session IDs; the canonical HTML path _is_ the identity (`src/session-store.js:sessionKey`).
 

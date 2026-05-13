@@ -33,7 +33,7 @@ That loses the thing HTML is best at: interactivity.
 
 Lavish Editor opens agent-generated HTML files in a local browser, lets you pinpoint elements or selected text and send feedback to the agent to address.
 
-- **Local-first** - Work with your local HTML artifacts with a local CLI. The server defaults to `127.0.0.1`, and you can bind it elsewhere with `--host` when needed.
+- **Local-first** - Work with your local HTML artifacts with a local CLI. The server defaults to `127.0.0.1`, and you can bind it elsewhere with `--host` when the browser needs network access.
 - **Human-AI collaboration** - Annotate elements, selected text ranges, and send messages to the agent without leaving Lavish Editor.
 - **Battery included** - Lavish Editor teaches your agent good visualization for common use cases such as technial plans, design explorations and more out of the box.
 
@@ -119,13 +119,13 @@ Known playbook IDs: `diagram`, `table`, `comparison`, `plan`, `diff`, `input`, `
 | Command                               | Flag                  | Description                                                               |
 | ------------------------------------- | --------------------- | ------------------------------------------------------------------------- |
 | `lavish-axi <html-file>`              | `--no-open`           | Ensure the server/session exists without opening another browser window.  |
-| `lavish-axi <html-file> / poll / end` | `--host <host>`       | Target a server on another host; reuse the same host for follow-up calls. |
+| `lavish-axi <html-file> / poll / end` | `--host <host>`       | Use a local server bound to this host; reuse it for follow-up calls.       |
 | `lavish-axi server`                   | `--port <port>`       | Override the server port; defaults to `4387`.                             |
 | `lavish-axi server`                   | `--host <host>`       | Bind the background server to another host; defaults to `127.0.0.1`.      |
 | `lavish-axi poll`                     | `--agent-reply "..."` | Show the agent's reply in the existing browser chat before polling again. |
 | `lavish-axi poll`                     | `--timeout-ms <ms>`   | Test/debug escape hatch only; agents should normally omit it.             |
 
-When you open a session against a non-default host, pass the same `--host` to later `poll` and `end` commands so they reach the same server.
+When you open a session against a non-default host, pass the same `--host` to later `poll` and `end` commands so they reach the same server. File-backed API calls still have to originate from the server machine; binding beyond loopback only exposes the browser-facing session UI.
 
 ## Development
 
