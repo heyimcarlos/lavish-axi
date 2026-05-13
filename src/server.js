@@ -1,5 +1,6 @@
 import { EventEmitter } from "node:events";
 import { readFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 
 import chokidar from "chokidar";
@@ -51,12 +52,20 @@ export async function serve({ port, host = "127.0.0.1", stateFile, version = "" 
   });
 
   app.post("/shutdown", (req, res) => {
+    if (!isLocalFileApiRequest(req)) {
+      res.status(403).json({ error: "Forbidden" });
+      return;
+    }
     res.json({ status: "shutting-down" });
     // Defer until after the response flushes so the client gets confirmation.
     setImmediate(shutdown);
   });
 
   app.post("/api/sessions", async (req, res, next) => {
+    if (!isLocalFileApiRequest(req)) {
+      res.status(403).json({ error: "Forbidden" });
+      return;
+    }
     try {
       const file = await canonicalFile(req.body.file);
       const key = sessionKey(file);
@@ -71,6 +80,10 @@ export async function serve({ port, host = "127.0.0.1", stateFile, version = "" 
   });
 
   app.get("/api/poll", async (req, res, next) => {
+    if (!isLocalFileApiRequest(req)) {
+      res.status(403).json({ error: "Forbidden" });
+      return;
+    }
     try {
       const file = await canonicalFile(String(req.query.file || ""));
       const key = sessionKey(file);
@@ -138,6 +151,10 @@ export async function serve({ port, host = "127.0.0.1", stateFile, version = "" 
   });
 
   app.post("/api/:key/agent-reply", async (req, res, next) => {
+    if (!isLocalFileApiRequest(req)) {
+      res.status(403).json({ error: "Forbidden" });
+      return;
+    }
     try {
       const text = String(req.body?.text || "");
       const session = await store.addAgentReply(req.params.key, text);
@@ -153,6 +170,10 @@ export async function serve({ port, host = "127.0.0.1", stateFile, version = "" 
   });
 
   app.post("/api/end", async (req, res, next) => {
+    if (!isLocalFileApiRequest(req)) {
+      res.status(403).json({ error: "Forbidden" });
+      return;
+    }
     try {
       const file = await canonicalFile(req.body.file);
       const key = sessionKey(file);
@@ -353,6 +374,36 @@ export function resolveArtifactAsset(root, assetPath) {
     return null;
   }
   return file;
+}
+
+function isLocalFileApiRequest(req) {
+  return isLocalRequestAddress(req.socket.remoteAddress);
+}
+
+export function isLocalRequestAddress(remoteAddress, localAddresses = localNetworkAddresses()) {
+  const address = normalizeRemoteAddress(remoteAddress);
+  if (!address) return false;
+  if (address === "::1" || address === "localhost" || address.startsWith("127.")) return true;
+  return new Set(localAddresses.map(normalizeRemoteAddress)).has(address);
+}
+
+function localNetworkAddresses() {
+  const addresses = [];
+  for (const entries of Object.values(os.networkInterfaces())) {
+    for (const entry of entries || []) {
+      if (entry?.address) {
+        addresses.push(entry.address);
+      }
+    }
+  }
+  return addresses;
+}
+
+function normalizeRemoteAddress(address) {
+  const value = String(address || "").trim();
+  if (!value) return "";
+  const unbracketed = value.startsWith("[") && value.endsWith("]") ? value.slice(1, -1) : value;
+  return unbracketed.startsWith("::ffff:") ? unbracketed.slice("::ffff:".length) : unbracketed;
 }
 
 function resolveSessionUrlHost(bindHost, requestHostHeader) {

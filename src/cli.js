@@ -155,7 +155,7 @@ export function createOpenOutput({ file, url, status, host = "127.0.0.1" }) {
   const hostArg = commandHostArg(host);
   return {
     session: { file, url, status },
-    next_step: `Tell the user to open ${url} to review the artifact in Lavish Editor, then run \`lavish-axi poll ${file}${hostArg}\`. This command long-polls until the user sends feedback or ends the session. Do not pass --timeout-ms during normal agent use. Do not set a short shell timeout; either run it without a timeout or set the shell timeout above 10 minutes. After applying feedback, run \`lavish-axi poll ${file}${hostArg} --agent-reply "<message for the user>"\` without --timeout-ms to show your response in Lavish Editor and wait for more feedback.`,
+    next_step: `Run \`lavish-axi poll ${file}${hostArg}\`. This command long-polls until the user sends feedback or ends the session. Do not pass --timeout-ms during normal agent use. Do not set a short shell timeout; either run it without a timeout or set the shell timeout above 10 minutes. After applying feedback, run \`lavish-axi poll ${file}${hostArg} --agent-reply "<message for the user>"\` without --timeout-ms to show your response in Lavish Editor and wait for more feedback.`,
   };
 }
 

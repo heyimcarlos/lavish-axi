@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { createChromeHtml, createSdkJs, resolveArtifactAsset, serve } from "../src/server.js";
+import { createChromeHtml, createSdkJs, isLocalRequestAddress, resolveArtifactAsset, serve } from "../src/server.js";
 
 async function chromeClientSource() {
   return readFile(new URL("../src/chrome-client.js", import.meta.url), "utf8");
@@ -655,4 +655,14 @@ test("wildcard bind hosts preserve the request host in session URLs", async () =
     await server.close();
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+test("file API requests must originate from the local machine", () => {
+  assert.equal(isLocalRequestAddress("127.0.0.1", []), true);
+  assert.equal(isLocalRequestAddress("::1", []), true);
+  assert.equal(isLocalRequestAddress("::ffff:127.0.0.1", []), true);
+  assert.equal(isLocalRequestAddress("10.0.0.7", ["10.0.0.7"]), true);
+  assert.equal(isLocalRequestAddress("::ffff:10.0.0.7", ["10.0.0.7"]), true);
+  assert.equal(isLocalRequestAddress("10.0.0.8", ["10.0.0.7"]), false);
+  assert.equal(isLocalRequestAddress("203.0.113.20", ["10.0.0.7"]), false);
 });
