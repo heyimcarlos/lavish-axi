@@ -309,15 +309,13 @@ async function ensureServer({ forceRestart = false, host = "127.0.0.1" } = {}) {
       }
     }
   }
-  if (isWildcardBindHost(host)) {
-    const conflictingServer = await findLavishServerOnPort(port);
-    if (conflictingServer) {
-      await requestShutdown(conflictingServer.host, port);
-      const freed = await waitForPortFree(conflictingServer.host, port, 2000);
-      if (!freed) {
-        killProcessOnPort(port);
-        await waitForPortFree(conflictingServer.host, port, 3000);
-      }
+  const conflictingServer = await findLavishServerOnPort(port);
+  if (conflictingServer) {
+    await requestShutdown(conflictingServer.host, port);
+    const freed = await waitForPortFree(conflictingServer.host, port, 2000);
+    if (!freed) {
+      killProcessOnPort(port);
+      await waitForPortFree(conflictingServer.host, port, 3000);
     }
   }
   await startServer(port, host);
@@ -474,14 +472,9 @@ function normalizeListeningHost(host) {
     return value.slice(1, -1);
   }
   if (value === "0.0.0.0" || value === "::") {
-    return "0.0.0.0";
+    return value;
   }
   return value;
-}
-
-function isWildcardBindHost(host) {
-  const value = String(host || "").trim();
-  return value === "0.0.0.0" || value === "::";
 }
 
 async function startServer(port, host = "127.0.0.1") {

@@ -365,11 +365,13 @@ test("fileArg returns undefined when no file is present", () => {
   assert.equal(fileArg([]), undefined);
 });
 
-test("wildcard host URLs normalize to localhost", () => {
-  assert.equal(createHttpBaseUrl("0.0.0.0", 4387), "http://localhost:4387");
-  assert.equal(createHttpBaseUrl("::", 4387), "http://localhost:4387");
+test("wildcard host URLs use the matching loopback family", () => {
+  assert.equal(createHttpBaseUrl("0.0.0.0", 4387), "http://127.0.0.1:4387");
+  assert.equal(createHttpBaseUrl("::", 4387), "http://[::1]:4387");
   assert.equal(createHttpBaseUrl("127.0.0.1", 4387), "http://127.0.0.1:4387");
   assert.equal(createHttpBaseUrl("::1", 4387), "http://[::1]:4387");
+  assert.equal(formatHttpRequestHost("0.0.0.0"), "127.0.0.1");
+  assert.equal(formatHttpRequestHost("::"), "::1");
 });
 
 test("scoped IPv6 hosts encode zone identifiers for URLs", () => {
@@ -433,7 +435,58 @@ const wildcardBindHost = firstNonInternalIpv4();
     assert.match(stdout, /status: (opened|ready)/);
     const health = await (await fetch(`http://${wildcardBindHost}:${port}/health`)).json();
     assert.equal(health.host, "0.0.0.0");
+    await fetch(`http://${wildcardBindHost}:${port}/shutdown`, { method: "POST" });
   } finally {
+    await fetch(`http://${wildcardBindHost}:${port}/shutdown`, { method: "POST" }).catch(() => undefined);
+    await server.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+(wildcardBindHost ? test : test.skip)("open switches a port from localhost to a specific interface", async () => {
+  const dir = await mkdtemp(`${os.tmpdir()}/lavish-axi-bind-test-`);
+  const artifactPath = `${dir}/artifact.html`;
+  const stateFile = `${dir}/state.json`;
+  await writeFile(artifactPath, "<h1>Host switch test</h1>");
+  const server = await serve({ port: 0, host: "127.0.0.1", stateFile, version: "9.9.9-test" });
+  const port = server.port;
+  try {
+    const child = spawn(
+      process.execPath,
+      [
+        fileURLToPath(new URL("../bin/lavish-axi.js", import.meta.url)),
+        "open",
+        artifactPath,
+        "--host",
+        wildcardBindHost,
+        "--no-open",
+      ],
+      {
+        cwd: fileURLToPath(new URL("..", import.meta.url)),
+        env: {
+          ...process.env,
+          LAVISH_AXI_PORT: String(port),
+          LAVISH_AXI_STATE_DIR: dir,
+        },
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+    const [status, stdout, stderr] = await Promise.all([
+      new Promise((resolve, reject) => {
+        child.once("error", reject);
+        child.once("close", resolve);
+      }),
+      streamToString(child.stdout),
+      streamToString(child.stderr),
+    ]);
+
+    assert.equal(status, 0, stderr);
+    assert.match(stdout, /status: (opened|ready)/);
+    const health = await (await fetch(`http://${wildcardBindHost}:${port}/health`)).json();
+    assert.equal(health.host, wildcardBindHost);
+    await fetch(`http://${wildcardBindHost}:${port}/shutdown`, { method: "POST" });
+  } finally {
+    await fetch(`http://${wildcardBindHost}:${port}/shutdown`, { method: "POST" }).catch(() => undefined);
     await server.close();
     await rm(dir, { recursive: true, force: true });
   }
