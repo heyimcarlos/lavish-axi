@@ -367,19 +367,13 @@ export function shouldKillProcessOnPort(currentVersion, healthBody) {
 
 export function shouldReuseServerForHost(requestedHost, healthBody) {
   if (!healthBody || typeof healthBody !== "object") return false;
-  const host = String(requestedHost || "").trim() || "127.0.0.1";
-  const listenerHost = String(healthBody.host || "").trim();
-  if (!listenerHost) return false;
-  if (host === listenerHost) {
-    return true;
-  }
-  if (isWildcardHost(listenerHost)) {
-    return true;
-  }
-  if (isWildcardHost(host) && isLoopbackHost(listenerHost)) {
-    return true;
-  }
-  return false;
+  const host = normalizeReuseHost(requestedHost);
+  const listenerHost = normalizeReuseHost(healthBody.host);
+  if (!host || !listenerHost) return false;
+  if (host === listenerHost) return true;
+  if (listenerHost === "wildcard") return true;
+  if (host === "wildcard") return false;
+  return host === "loopback" && listenerHost === "loopback";
 }
 
 export function isLocalServerHost(requestedHost) {
@@ -450,6 +444,16 @@ function isWildcardHost(host) {
 
 function isLoopbackHost(host) {
   return host === "localhost" || host === "::1" || host.startsWith("127.");
+}
+
+function normalizeReuseHost(host) {
+  const value = String(host || "").trim();
+  if (!value) return "";
+  if (isWildcardHost(value)) return "wildcard";
+  if (value === "localhost" || value === "127.0.0.1" || value === "::1") {
+    return "loopback";
+  }
+  return value;
 }
 
 async function waitForPortFree(host, port, timeoutMs) {
