@@ -7,6 +7,7 @@ import express from "express";
 
 import { createArtifactSdk } from "./artifact-sdk.js";
 import { injectLavishSdk } from "./html-transform.js";
+import { createHttpBaseUrl } from "./network.js";
 import { canonicalFile, SessionStore, sessionKey } from "./session-store.js";
 
 const chromeClientUrl = new URL("./chrome-client.js", import.meta.url);
@@ -58,7 +59,7 @@ export async function serve({ port, host = "127.0.0.1", stateFile, version = "" 
     try {
       const file = await canonicalFile(req.body.file);
       const key = sessionKey(file);
-      const url = `http://${host}:${port}/session/${key}`;
+      const url = `${createHttpBaseUrl(host, port)}/session/${key}`;
       const session = await store.upsertSession(file, url);
       watchSession(session, watchers, events);
       res.json({ key, file, url, status: "opened" });
