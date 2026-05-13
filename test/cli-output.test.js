@@ -205,6 +205,18 @@ test("open output carries non-default host through follow-up commands", () => {
   assert.match(output.next_step, /lavish-axi poll \/tmp\/artifact\.html --host 0\.0\.0\.0 --agent-reply/);
 });
 
+test("open output preserves localhost through follow-up commands", () => {
+  const output = createOpenOutput({
+    file: "/tmp/artifact.html",
+    host: "localhost",
+    url: "http://localhost:4387/session/abc123",
+    status: "opened",
+  });
+
+  assert.match(output.next_step, /lavish-axi poll \/tmp\/artifact\.html --host localhost/);
+  assert.match(output.next_step, /lavish-axi poll \/tmp\/artifact\.html --host localhost --agent-reply/);
+});
+
 test("poll help warns agents not to use short shell timeouts", () => {
   const help = getCommandHelp("poll");
 
@@ -233,6 +245,16 @@ test("poll output carries non-default host through follow-up commands", () => {
   });
 
   assert.match(output.next_step, /lavish-axi poll \/tmp\/report\.html --host 0\.0\.0\.0 --agent-reply/);
+});
+
+test("poll output preserves localhost through follow-up commands", () => {
+  const output = createPollOutput({
+    file: "/tmp/report.html",
+    host: "localhost",
+    response: { status: "feedback", dom_snapshot: "", prompts: [] },
+  });
+
+  assert.match(output.next_step, /lavish-axi poll \/tmp\/report\.html --host localhost --agent-reply/);
 });
 
 test("html file arguments normalize to the hidden open command", () => {
