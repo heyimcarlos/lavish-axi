@@ -447,7 +447,10 @@ function findListeningServersOnPort(port) {
 }
 
 function parseListeningHost(listeningName) {
-  const value = String(listeningName || "").trim().replace(/^TCP\s+/i, "").replace(/\s+\(LISTEN\)$/i, "");
+  const value = String(listeningName || "")
+    .trim()
+    .replace(/^TCP\s+/i, "")
+    .replace(/\s+\(LISTEN\)$/i, "");
   const separator = value.lastIndexOf(":");
   if (separator === -1) {
     return null;
