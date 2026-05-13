@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <link rel="stylesheet" href="main.css" />
+  </head>
+  <body>
+    <div
+      id="root"
+      data-composition-id="scene-terminal"
+      data-start="0"
+      data-duration="33.5"
+      data-width="1920"
+      data-height="1080"
+    >
+      <section id="scene-terminal" class="scene">
+        <div class="scene-content terminal-stage">
+          <div class="terminal-shell">
+            <div class="terminal-bar">
+              <div class="traffic"><span></span><span></span><span></span></div>
+              <span>kun@MacBook-Pro dev % agent</span>
+            </div>
+            <div class="terminal-body">
+              <div class="terminal-conversation">
+                <div class="terminal-turn user">
+                  <span class="terminal-speaker">Kun</span> We need the agent to think through the approach before
+                  writing code.
+                </div>
+                <div class="terminal-turn">
+                  <span class="terminal-speaker">Agent</span> I can turn the discussion into a reviewable browser
+                  artifact with a diagram and concrete decisions.
+                </div>
+              </div>
+              <div class="prompt-line">
+                <span class="prompt-marker">&gt;</span><span id="typed-prompt" class="prompt-text"></span>
+              </div>
+              <div class="agent-log">
+                <div id="log-1" class="command">Drafting the technical approach...</div>
+                <div id="log-2">Creating <span class="file">/var/folders/tmp/design-plan.html</span></div>
+                <div id="log-3" class="command">$ lavish-axi /var/folders/tmp/design-plan.html</div>
+                <div id="log-4" class="green">Opened in Lavish Editor.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="caption-block">
+          <h1>Ask the agent for an artifact.</h1>
+          <p>Then review and collaborate on it in the browser.</p>
+        </div>
+      </section>
+    </div>
+    <script>
+      window.__timelines = window.__timelines || {};
+      window.__timelines["scene-terminal"] = gsap.timeline({ paused: true });
+    </script>
+  </body>
+</html>

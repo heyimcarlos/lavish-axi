@@ -1,5 +1,6 @@
 import { EventEmitter } from "node:events";
 import { readFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 
 import chokidar from "chokidar";
@@ -7,6 +8,7 @@ import express from "express";
 
 import { createArtifactSdk } from "./artifact-sdk.js";
 import { injectLavishSdk } from "./html-transform.js";
+import { createHttpBaseUrl } from "./network.js";
 import { canonicalFile, SessionStore, sessionKey } from "./session-store.js";
 
 const chromeClientUrl = new URL("./chrome-client.js", import.meta.url);
@@ -29,18 +31,19 @@ const designAssetUrls = {
   },
 };
 
-export async function serve({ port, stateFile, version = "" }) {
+export async function serve({ port, host = "127.0.0.1", stateFile, version = "" }) {
   const app = express();
   const store = new SessionStore(stateFile);
   const events = new EventEmitter();
   const watchers = new Map();
   const activePolls = new Map();
   const sseClients = new Set();
+  let listeningPort = port;
 
   app.use(express.json({ limit: "2mb" }));
 
   app.get("/health", (req, res) => {
-    res.json({ ok: true, app: "lavish-axi", version });
+    res.json({ ok: true, app: "lavish-axi", host, version });
   });
 
   let shutdownResolve;
@@ -49,16 +52,25 @@ export async function serve({ port, stateFile, version = "" }) {
   });
 
   app.post("/shutdown", (req, res) => {
+    if (!isLocalFileApiRequest(req)) {
+      res.status(403).json({ error: "Forbidden" });
+      return;
+    }
     res.json({ status: "shutting-down" });
     // Defer until after the response flushes so the client gets confirmation.
     setImmediate(shutdown);
   });
 
   app.post("/api/sessions", async (req, res, next) => {
+    if (!isLocalFileApiRequest(req)) {
+      res.status(403).json({ error: "Forbidden" });
+      return;
+    }
     try {
       const file = await canonicalFile(req.body.file);
       const key = sessionKey(file);
-      const url = `http://localhost:${port}/session/${key}`;
+      const urlHost = resolveSessionUrlHost(host, req.headers.host);
+      const url = `${createHttpBaseUrl(urlHost, listeningPort)}/session/${key}`;
       const session = await store.upsertSession(file, url);
       watchSession(session, watchers, events);
       res.json({ key, file, url, status: "opened" });
@@ -68,6 +80,10 @@ export async function serve({ port, stateFile, version = "" }) {
   });
 
   app.get("/api/poll", async (req, res, next) => {
+    if (!isLocalFileApiRequest(req)) {
+      res.status(403).json({ error: "Forbidden" });
+      return;
+    }
     try {
       const file = await canonicalFile(String(req.query.file || ""));
       const key = sessionKey(file);
@@ -135,6 +151,10 @@ export async function serve({ port, stateFile, version = "" }) {
   });
 
   app.post("/api/:key/agent-reply", async (req, res, next) => {
+    if (!isLocalFileApiRequest(req)) {
+      res.status(403).json({ error: "Forbidden" });
+      return;
+    }
     try {
       const text = String(req.body?.text || "");
       const session = await store.addAgentReply(req.params.key, text);
@@ -150,6 +170,10 @@ export async function serve({ port, stateFile, version = "" }) {
   });
 
   app.post("/api/end", async (req, res, next) => {
+    if (!isLocalFileApiRequest(req)) {
+      res.status(403).json({ error: "Forbidden" });
+      return;
+    }
     try {
       const file = await canonicalFile(req.body.file);
       const key = sessionKey(file);
@@ -293,8 +317,9 @@ export async function serve({ port, stateFile, version = "" }) {
   });
 
   const httpServer = await new Promise((resolve) => {
-    const s = app.listen(port, "127.0.0.1", () => resolve(s));
+    const s = app.listen(port, host, () => resolve(s));
   });
+  listeningPort = httpServer.address().port;
 
   let shuttingDown = false;
   function shutdown() {
@@ -351,6 +376,54 @@ export function resolveArtifactAsset(root, assetPath) {
   return file;
 }
 
+function isLocalFileApiRequest(req) {
+  return isLocalRequestAddress(req.socket.remoteAddress);
+}
+
+export function isLocalRequestAddress(remoteAddress, localAddresses = localNetworkAddresses()) {
+  const address = normalizeRemoteAddress(remoteAddress);
+  if (!address) return false;
+  if (address === "::1" || address === "localhost" || address.startsWith("127.")) return true;
+  return new Set(localAddresses.map(normalizeRemoteAddress)).has(address);
+}
+
+function localNetworkAddresses() {
+  const addresses = [];
+  for (const entries of Object.values(os.networkInterfaces())) {
+    for (const entry of entries || []) {
+      if (entry?.address) {
+        addresses.push(entry.address);
+      }
+    }
+  }
+  return addresses;
+}
+
+function normalizeRemoteAddress(address) {
+  const value = String(address || "").trim();
+  if (!value) return "";
+  const unbracketed = value.startsWith("[") && value.endsWith("]") ? value.slice(1, -1) : value;
+  return unbracketed.startsWith("::ffff:") ? unbracketed.slice("::ffff:".length) : unbracketed;
+}
+
+function resolveSessionUrlHost(bindHost, requestHostHeader) {
+  if (!isWildcardHost(bindHost)) {
+    return bindHost;
+  }
+  const requestHost = parseRequestHost(requestHostHeader);
+  return requestHost || bindHost;
+}
+
+function parseRequestHost(hostHeader) {
+  const value = String(hostHeader || "").trim();
+  if (!value) return "";
+  try {
+    return new URL(`http://${value}`).hostname;
+  } catch {
+    return "";
+  }
+}
+
 function watchSession(session, watchers, events) {
   if (watchers.has(session.key)) {
     return;
@@ -380,6 +453,10 @@ function setPollActive(key, activePolls, events, active) {
   }
   if (count > 0 === nextCount > 0) return;
   events.emit("agent-working", key, nextCount === 0);
+}
+
+function isWildcardHost(host) {
+  return host === "0.0.0.0" || host === "::";
 }
 
 export function createChromeHtml(session) {

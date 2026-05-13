@@ -1,3 +1,4 @@
+import http from "node:http";
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { access } from "node:fs/promises";
@@ -8,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import { AxiError, runAxiCli } from "axi-sdk-js";
 
 import { createDesignOutput, DESIGN_SYSTEM_HINT } from "./design-reference.js";
+import { createHttpBaseUrl, formatHttpRequestHost } from "./network.js";
 import { defaultPort, ensureStateDir, stateFile } from "./paths.js";
 import { findPlaybook, listPlaybooks, playbookIds } from "./playbooks.js";
 import { serve } from "./server.js";
@@ -118,10 +120,13 @@ export function createHomeOutput({ bin, sessions, includeSessions = true }) {
     ],
     playbooks: listPlaybooks(),
     help: [
-      "Run `lavish-axi <html-file>` to open or resume a Lavish Editor session",
+      "Run `lavish-axi <html-file> [--host <host>]` to open or resume a Lavish Editor session",
       "Unless the user specifies another location, create HTML artifacts in the current working directory under `.lavish/`",
-      "Run `lavish-axi poll <html-file>` to wait for user feedback",
-      "Run `lavish-axi end <html-file>` to end a session",
+      "Run `lavish-axi poll <html-file> [--host <host>]` to wait for user feedback",
+      "Run `lavish-axi end <html-file> [--host <host>]` to end a session",
+      "Run `lavish-axi server [--host <host>] [--port 4387]` to run the background server manually",
+      "When using a non-default host, pass the same `--host` to follow-up `poll` and `end` calls",
+      "Binding beyond loopback exposes only browser-facing routes to the network; file/system API calls must originate on the server machine",
       "Run `lavish-axi playbook <playbook_id>` for focused artifact guidance",
       DESIGN_SYSTEM_HINT,
       "Use lavish-axi when the user asks for a visual artifact, HTML explainer, interactive prototype, review surface, technical plan, comparison, report, or browser-based feedback loop",
@@ -148,22 +153,27 @@ export function createPlaybookOutput(args) {
   return { playbook };
 }
 
-export function createOpenOutput({ file, url, status }) {
+export function createOpenOutput({ file, url, status, host = "127.0.0.1" }) {
+  const hostArg = commandHostArg(host);
   return {
     session: { file, url, status },
-    next_step: `Run \`lavish-axi poll ${file}\`. This command long-polls until the user sends feedback or ends the session. Do not pass --timeout-ms during normal agent use. Do not set a short shell timeout; either run it without a timeout or set the shell timeout above 10 minutes. After applying feedback, run \`lavish-axi poll ${file} --agent-reply "<message for the user>"\` without --timeout-ms to show your response in Lavish Editor and wait for more feedback.`,
+    next_step: `Run \`lavish-axi poll ${file}${hostArg}\`. This command long-polls until the user sends feedback or ends the session. Do not pass --timeout-ms during normal agent use. Do not set a short shell timeout; either run it without a timeout or set the shell timeout above 10 minutes. After applying feedback, run \`lavish-axi poll ${file}${hostArg} --agent-reply "<message for the user>"\` without --timeout-ms to show your response in Lavish Editor and wait for more feedback.`,
   };
 }
 
 async function openCommand(args) {
-  const file = args.find((arg) => !arg.startsWith("-"));
+  const file = fileArg(args);
   if (!file) {
     throw new AxiError("HTML file path is required", "VALIDATION_ERROR", ["Run `lavish-axi <html-file>`"]);
   }
   await assertHtmlFile(file);
   const absolute = await canonicalFile(file);
-  const baseUrl = await ensureServer({ forceRestart: shouldForceRestartForLocalBuild(process.argv[1] || "") });
-  const response = await postJson(`${baseUrl}/api/sessions`, { file: absolute });
+  const host = flagValue(args, "--host") || "127.0.0.1";
+  await ensureServer({
+    forceRestart: shouldForceRestartForLocalBuild(process.argv[1] || ""),
+    host,
+  });
+  const response = await postJson(host, defaultPort(), "/api/sessions", { file: absolute });
   if (shouldOpenBrowser(args, process.env)) {
     try {
       const open = (await import("open")).default;
@@ -172,7 +182,12 @@ async function openCommand(args) {
       response.status = "ready";
     }
   }
-  return createOpenOutput({ file: absolute, url: response.url, status: response.status || "opened" });
+  return createOpenOutput({
+    file: absolute,
+    url: response.url,
+    status: response.status || "opened",
+    host,
+  });
 }
 
 export function shouldOpenBrowser(args, env) {
@@ -180,23 +195,29 @@ export function shouldOpenBrowser(args, env) {
 }
 
 async function pollCommand(args) {
-  const file = args[0];
+  const file = fileArg(args);
   if (!file) {
     throw new AxiError("HTML file path is required", "VALIDATION_ERROR", ["Run `lavish-axi poll <html-file>`"]);
   }
   const absolute = await canonicalFile(file);
-  const baseUrl = await ensureServer();
+  const host = flagValue(args, "--host") || "127.0.0.1";
+  await ensureServer({ host });
   const agentReply = flagValue(args, "--agent-reply");
   if (agentReply) {
-    await postJson(`${baseUrl}/api/${sessionKey(absolute)}/agent-reply`, { text: agentReply });
+    await postJson(host, defaultPort(), `/api/${sessionKey(absolute)}/agent-reply`, { text: agentReply });
   }
   const timeoutMs = flagValue(args, "--timeout-ms");
   const timeoutQuery = timeoutMs ? `&timeoutMs=${encodeURIComponent(timeoutMs)}` : "";
-  const response = await fetchJson(`${baseUrl}/api/poll?file=${encodeURIComponent(absolute)}${timeoutQuery}`);
-  return createPollOutput({ file: absolute, response });
+  const response = await fetchJson(
+    host,
+    defaultPort(),
+    `/api/poll?file=${encodeURIComponent(absolute)}${timeoutQuery}`,
+  );
+  return createPollOutput({ file: absolute, response, host });
 }
 
-export function createPollOutput({ file, response }) {
+export function createPollOutput({ file, response, host = "127.0.0.1" }) {
+  const hostArg = commandHostArg(host);
   if (response.status === "missing") {
     throw new AxiError("No active Lavish Editor session for this file", "NOT_FOUND", [
       `Run \`lavish-axi ${file}\` first`,
@@ -207,7 +228,7 @@ export function createPollOutput({ file, response }) {
       session: { file, status: "feedback" },
       dom_snapshot: response.dom_snapshot || "",
       prompts: response.prompts || [],
-      next_step: `Apply the requested changes to ${file}, then run \`lavish-axi poll ${file} --agent-reply "<message for the user>"\` without --timeout-ms unless the user ended the session. The poll command waits until the user sends more feedback or ends the session; do not set a short shell timeout, or set the shell timeout above 10 minutes.`,
+      next_step: `Apply the requested changes to ${file}, then run \`lavish-axi poll ${file}${hostArg} --agent-reply "<message for the user>"\` without --timeout-ms unless the user ended the session. The poll command waits until the user sends more feedback or ends the session; do not set a short shell timeout, or set the shell timeout above 10 minutes.`,
     };
   }
   if (response.status === "ended") {
@@ -215,18 +236,19 @@ export function createPollOutput({ file, response }) {
   }
   return {
     session: { file, status: response.status || "waiting" },
-    next_step: `No user feedback arrived before the optional timeout. Run \`lavish-axi poll ${file}\` without --timeout-ms to wait indefinitely.`,
+    next_step: `No user feedback arrived before the optional timeout. Run \`lavish-axi poll ${file}${hostArg}\` without --timeout-ms to wait indefinitely.`,
   };
 }
 
 async function endCommand(args) {
-  const file = args[0];
+  const file = fileArg(args);
   if (!file) {
     throw new AxiError("HTML file path is required", "VALIDATION_ERROR", ["Run `lavish-axi end <html-file>`"]);
   }
   const absolute = await canonicalFile(file);
-  const baseUrl = await ensureServer();
-  const response = await postJson(`${baseUrl}/api/end`, { file: absolute });
+  const host = flagValue(args, "--host") || "127.0.0.1";
+  await ensureServer({ host });
+  const response = await postJson(host, defaultPort(), "/api/end", { file: absolute });
   return { session: { file: absolute, status: response.status || "ended" } };
 }
 
@@ -240,7 +262,8 @@ async function designCommand() {
 
 async function serverCommand(args) {
   const port = Number(flagValue(args, "--port") || defaultPort());
-  const server = await serve({ port, stateFile: stateFile(), version: VERSION });
+  const host = flagValue(args, "--host") || "127.0.0.1";
+  const server = await serve({ port, host, stateFile: stateFile(), version: VERSION });
   await server.done;
   return "";
 }
@@ -267,39 +290,53 @@ function isHtmlPath(file) {
   return file.toLowerCase().endsWith(".html") || file.toLowerCase().endsWith(".htm");
 }
 
-async function ensureServer({ forceRestart = false } = {}) {
+async function ensureServer({ forceRestart = false, host = "127.0.0.1" } = {}) {
   const port = defaultPort();
-  const baseUrl = `http://localhost:${port}`;
-  const existing = await fetchHealth(baseUrl);
-  if (existing && !shouldRestartServer(VERSION, existing, forceRestart)) {
+  const baseUrl = createHttpBaseUrl(host, port);
+  const existing = await fetchHealth(host, port);
+  if (existing && !shouldRestartServer(VERSION, existing, forceRestart) && shouldReuseServerForHost(host, existing)) {
     return baseUrl;
+  }
+  if (!isLocalServerHost(host)) {
+    throw new AxiError("Lavish Editor server is not running", "SERVER_ERROR", [
+      `Run \`lavish-axi server --host ${host} --port ${port}\` on that host first`,
+    ]);
   }
   if (existing) {
     // Stale server from an older release is squatting on the port. Ask it to shut down
     // gracefully so the upgraded client doesn't keep handing users an old chrome.
-    await requestShutdown(baseUrl);
-    const freed = await waitForPortFree(baseUrl, 2000);
+    await requestShutdown(host, port);
+    const freed = await waitForPortFree(host, port, 2000);
     if (!freed) {
       // Pre-handshake servers (any release older than this change) don't expose /shutdown
       // so the POST 404'd. Fall back to SIGTERM by PID so the very first upgrade still
       // works, then keep waiting.
       if (shouldKillProcessOnPort(VERSION, existing)) {
         killProcessOnPort(port);
-        await waitForPortFree(baseUrl, 3000);
+        await waitForPortFree(host, port, 3000);
       }
     }
   }
-  await startServer(port);
+  const conflictingServer = await findLavishServerOnPort(port);
+  if (conflictingServer) {
+    await requestShutdown(conflictingServer.host, port);
+    const freed = await waitForPortFree(conflictingServer.host, port, 2000);
+    if (!freed) {
+      killProcessOnPort(port);
+      await waitForPortFree(conflictingServer.host, port, 3000);
+    }
+  }
+  await startServer(port, host);
   const deadline = Date.now() + 5000;
   while (Date.now() < deadline) {
-    const health = await fetchHealth(baseUrl);
+    const health = await fetchHealth(host, port);
     if (health && !shouldRestartServer(VERSION, health)) {
       return baseUrl;
     }
     await delay(100);
   }
   throw new AxiError("Lavish Editor server did not start", "SERVER_ERROR", [
-    `Run \`lavish-axi server --port ${port}\` to inspect server startup`,
+    `Run \`lavish-axi server --host ${host} --port ${port}\` to inspect server startup`,
   ]);
 }
 
@@ -330,28 +367,101 @@ export function shouldKillProcessOnPort(currentVersion, healthBody) {
   return healthBody.version !== currentVersion;
 }
 
-async function fetchHealth(baseUrl) {
+export function shouldReuseServerForHost(requestedHost, healthBody) {
+  if (!healthBody || typeof healthBody !== "object") return false;
+  const host = normalizeReuseHost(requestedHost);
+  const listenerHost = normalizeReuseHost(healthBody.host);
+  if (!host || !listenerHost) return false;
+  if (host === listenerHost) return true;
+  if (listenerHost === "wildcard") return true;
+  if (host === "wildcard") return false;
+  return host === "loopback" && listenerHost === "loopback";
+}
+
+export function isLocalServerHost(requestedHost) {
+  const host = String(requestedHost || "").trim() || "127.0.0.1";
+  if (isLoopbackHost(host) || isWildcardHost(host)) {
+    return true;
+  }
+  return localProbeHosts().includes(host);
+}
+
+async function fetchHealth(host, port) {
   try {
-    const response = await fetch(`${baseUrl}/health`);
-    if (!response.ok) return null;
-    return await response.json();
+    return await requestJson(host, port, "/health", { method: "GET" });
   } catch {
     return null;
   }
 }
 
-async function requestShutdown(baseUrl) {
+async function requestShutdown(host, port) {
   try {
-    await fetch(`${baseUrl}/shutdown`, { method: "POST" });
+    await requestJson(host, port, "/shutdown", { method: "POST" });
   } catch {
     // Best effort. If the server died before answering, the port will free up on its own.
   }
 }
 
-async function waitForPortFree(baseUrl, timeoutMs) {
+async function findLavishServerOnPort(port) {
+  const checkedHosts = new Set();
+  for (const listener of findListeningServersOnPort(port)) {
+    checkedHosts.add(listener.host);
+    const health = await fetchHealth(listener.host, port);
+    if (health && health.app === "lavish-axi") {
+      return { host: listener.host, health };
+    }
+  }
+
+  // Windows does not have lsof, and some platforms allow a wildcard listener to
+  // coexist with an interface-specific listener on the same port. Probe local
+  // interface addresses directly so switching from 10.x.x.x -> 0.0.0.0 can still
+  // find and shut down the old Lavish server before spawning the replacement.
+  for (const host of localProbeHosts()) {
+    if (checkedHosts.has(host)) continue;
+    checkedHosts.add(host);
+    const health = await fetchHealth(host, port);
+    if (health && health.app === "lavish-axi") {
+      return { host, health };
+    }
+  }
+  return null;
+}
+
+function localProbeHosts() {
+  const hosts = ["127.0.0.1", "localhost", "::1"];
+  for (const addresses of Object.values(os.networkInterfaces())) {
+    for (const address of addresses || []) {
+      if (!address || address.internal) continue;
+      if (address.family === "IPv4" || address.family === "IPv6") {
+        hosts.push(address.address);
+      }
+    }
+  }
+  return [...new Set(hosts)];
+}
+
+function isWildcardHost(host) {
+  return host === "0.0.0.0" || host === "::";
+}
+
+function isLoopbackHost(host) {
+  return host === "localhost" || host === "::1" || host.startsWith("127.");
+}
+
+function normalizeReuseHost(host) {
+  const value = String(host || "").trim();
+  if (!value) return "";
+  if (isWildcardHost(value)) return "wildcard";
+  if (value === "localhost" || value === "127.0.0.1" || value === "::1") {
+    return "loopback";
+  }
+  return value;
+}
+
+async function waitForPortFree(host, port, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if (!(await fetchHealth(baseUrl))) return true;
+    if (!(await fetchHealth(host, port))) return true;
     await delay(100);
   }
   return false;
@@ -380,10 +490,61 @@ function killProcessOnPort(port) {
   }
 }
 
-async function startServer(port) {
+function findListeningServersOnPort(port) {
+  try {
+    const result = spawnSync("lsof", ["-nP", "-iTCP:" + port, "-sTCP:LISTEN", "-Fpn"], { encoding: "utf8" });
+    if (result.status !== 0 || !result.stdout) return [];
+    const listeners = [];
+    let pid = null;
+    for (const line of result.stdout.split("\n")) {
+      if (!line) continue;
+      if (line.startsWith("p")) {
+        pid = Number(line.slice(1));
+        continue;
+      }
+      if (!line.startsWith("n")) continue;
+      const host = parseListeningHost(line.slice(1));
+      if (host) {
+        listeners.push({ pid, host });
+      }
+    }
+    return listeners;
+  } catch {
+    return [];
+  }
+}
+
+function parseListeningHost(listeningName) {
+  const value = String(listeningName || "")
+    .trim()
+    .replace(/^TCP\s+/i, "")
+    .replace(/\s+\(LISTEN\)$/i, "");
+  const separator = value.lastIndexOf(":");
+  if (separator === -1) {
+    return null;
+  }
+  const host = value.slice(0, separator).trim();
+  return normalizeListeningHost(host);
+}
+
+function normalizeListeningHost(host) {
+  const value = String(host || "").trim();
+  if (value === "" || value === "*") {
+    return "0.0.0.0";
+  }
+  if (value.startsWith("[") && value.endsWith("]")) {
+    return value.slice(1, -1);
+  }
+  if (value === "0.0.0.0" || value === "::") {
+    return value;
+  }
+  return value;
+}
+
+async function startServer(port, host = "127.0.0.1") {
   await ensureStateDir();
   const entry = resolveServerEntry();
-  const child = spawn(process.execPath, [entry, "server", "--port", String(port)], {
+  const child = spawn(process.execPath, [entry, "server", "--port", String(port), "--host", host], {
     detached: true,
     stdio: "ignore",
     env: { ...process.env, LAVISH_AXI_NO_OPEN: "1" },
@@ -409,24 +570,65 @@ export function createServerSpawnOptions() {
   };
 }
 
-async function fetchJson(url) {
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new AxiError(`Lavish Editor request failed: ${response.status}`, "SERVER_ERROR");
-  }
-  return response.json();
+async function fetchJson(host, port, path) {
+  return requestJson(host, port, path, { method: "GET" });
 }
 
-async function postJson(url, body) {
-  const response = await fetch(url, {
+async function postJson(host, port, path, body) {
+  return requestJson(host, port, path, {
     method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
+    body,
   });
-  if (!response.ok) {
-    throw new AxiError(`Lavish Editor request failed: ${response.status}`, "SERVER_ERROR");
-  }
-  return response.json();
+}
+
+/**
+ * @param {string} host
+ * @param {number} port
+ * @param {string} path
+ * @param {{ method?: string, body?: unknown }} [options]
+ */
+function requestJson(host, port, path, { method = "GET", body } = {}) {
+  const hostname = formatHttpRequestHost(host);
+  const payload = body === undefined ? null : JSON.stringify(body);
+  return new Promise((resolve, reject) => {
+    const req = http.request(
+      {
+        hostname,
+        port,
+        path,
+        method,
+        headers: payload
+          ? {
+              "content-type": "application/json",
+              "content-length": Buffer.byteLength(payload),
+            }
+          : undefined,
+      },
+      (res) => {
+        let data = "";
+        res.setEncoding("utf8");
+        res.on("data", (chunk) => {
+          data += chunk;
+        });
+        res.on("end", () => {
+          if (res.statusCode < 200 || res.statusCode >= 300) {
+            reject(new AxiError(`Lavish Editor request failed: ${res.statusCode}`, "SERVER_ERROR"));
+            return;
+          }
+          try {
+            resolve(data ? JSON.parse(data) : {});
+          } catch {
+            reject(new AxiError("Lavish Editor request failed: invalid JSON", "SERVER_ERROR"));
+          }
+        });
+      },
+    );
+    req.on("error", reject);
+    if (payload) {
+      req.write(payload);
+    }
+    req.end();
+  });
 }
 
 function flagValue(args, flag) {
@@ -437,6 +639,23 @@ function flagValue(args, flag) {
   return args[index + 1] || null;
 }
 
+function commandHostArg(host) {
+  const value = String(host || "").trim();
+  if (value === "" || value === "127.0.0.1") {
+    return "";
+  }
+  return ` --host ${value}`;
+}
+
+export function fileArg(args) {
+  const consumed = new Set();
+  for (const flag of ["--host", "--agent-reply", "--timeout-ms", "--port"]) {
+    const val = flagValue(args, flag);
+    if (val !== null) consumed.add(val);
+  }
+  return args.find((arg) => !arg.startsWith("-") && !consumed.has(arg));
+}
+
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -445,15 +664,15 @@ export function getCommandHelp(command) {
   return COMMAND_HELP[command] || null;
 }
 
-const TOP_LEVEL_HELP = `lavish-axi - Lavish Editor AXI\n\nUsage:\n  lavish-axi\n  lavish-axi <html-file>\n  lavish-axi poll <html-file> [--agent-reply "..."]\n  lavish-axi end <html-file>\n  lavish-axi playbook [playbook_id]\n  lavish-axi design\n\n${DESIGN_SYSTEM_HINT}\n\nNote: poll long-polls indefinitely by default until the user sends feedback or ends the session. Do not pass --timeout-ms during normal agent use; it is for tests and debugging only. do not set a short shell timeout; either run it without a timeout or use a very high threshold above 10 minutes.\n\n`;
+const TOP_LEVEL_HELP = `lavish-axi - Lavish Editor AXI\n\nUsage:\n  lavish-axi\n  lavish-axi <html-file> [--host <host>]\n  lavish-axi poll <html-file> [--host <host>] [--agent-reply "..."]\n  lavish-axi end <html-file> [--host <host>]\n  lavish-axi playbook [playbook_id]\n  lavish-axi design\n  lavish-axi server [--host <host>] [--port 4387]\n\n${DESIGN_SYSTEM_HINT}\n\nHost: the server defaults to 127.0.0.1. When using a non-default host, pass the same --host to follow-up poll and end commands. Binding beyond loopback exposes only browser-facing routes to the network; file/system API calls must originate on the server machine.\n\nNote: poll long-polls indefinitely by default until the user sends feedback or ends the session. Do not pass --timeout-ms during normal agent use; it is for tests and debugging only. do not set a short shell timeout; either run it without a timeout or use a very high threshold above 10 minutes.\n\n`;
 
 const COMMAND_HELP = {
-  open: `Usage: lavish-axi <html-file> [--no-open]\n\nOpen or resume a Lavish Editor review session for an HTML artifact. Use --no-open when you need to ensure the server/session exists without opening another browser window.\n`,
-  poll: `Usage: lavish-axi poll <html-file> [--agent-reply "..."]\n\nThis command long-polls indefinitely for queued user prompts, then returns them to the agent. Do not pass --timeout-ms during normal agent use; it is for tests and debugging only. do not set a short shell timeout; either run it without a timeout or use a very high threshold above 10 minutes so the user has time to review and send feedback. Use --agent-reply after applying prior feedback to display your response in Lavish Editor before waiting again.\n`,
-  end: `Usage: lavish-axi end <html-file>\n\nEnd a Lavish Editor session.\n`,
+  open: `Usage: lavish-axi <html-file> [--host <host>] [--no-open]\n\nOpen or resume a Lavish Editor review session for an HTML artifact. Use --no-open when you need to ensure the server/session exists without opening another browser window. When using a non-default host, pass the same --host to follow-up poll and end commands.\n`,
+  poll: `Usage: lavish-axi poll <html-file> [--host <host>] [--agent-reply "..."]\n\nThis command long-polls indefinitely for queued user prompts, then returns them to the agent. Use the same --host that opened the session. Do not pass --timeout-ms during normal agent use; it is for tests and debugging only. do not set a short shell timeout; either run it without a timeout or use a very high threshold above 10 minutes so the user has time to review and send feedback. Use --agent-reply after applying prior feedback to display your response in Lavish Editor before waiting again.\n`,
+  end: `Usage: lavish-axi end <html-file> [--host <host>]\n\nEnd a Lavish Editor session. Use the same --host that opened the session.\n`,
   playbook: `Usage: lavish-axi playbook [playbook_id]\n\nList focused artifact guidance playbooks, or show one playbook by ID. Known IDs: diagram, table, comparison, plan, diff, input, slides.\n\nExamples:\n  lavish-axi playbook\n  lavish-axi playbook diagram\n  lavish-axi playbook input\n`,
   design: `Usage: lavish-axi design\n\nShow technical reference for the Tailwind CSS browser runtime v4, DaisyUI v5 components, and DaisyUI themes that Lavish auto-injects into artifacts. Do not add these libraries separately.\n`,
-  server: `Usage: lavish-axi server [--port 4387]\n\nRun the local Lavish Editor server.\n`,
+  server: `Usage: lavish-axi server [--host <host>] [--port 4387]\n\nRun the Lavish Editor server. Binding beyond loopback exposes only browser-facing routes to the network; file/system API calls must originate on the server machine.\n`,
 };
 
 export { createDesignOutput };

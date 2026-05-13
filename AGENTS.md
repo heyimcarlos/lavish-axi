@@ -33,15 +33,16 @@ Lavish Editor is a CLI + local HTTP server that opens agent-generated HTML artif
 ### Process model
 
 The CLI (`bin/lavish-axi.js` -> `src/cli.js`) is the user-facing entry point.
-The first command that needs the server spawns `lavish-axi server` as a **detached** background process (`src/cli.js:startServer`) and waits for `/health`, which returns `{ ok, app, version }`.
-Subsequent CLI invocations reuse the running server only when its health version matches the current CLI version; stale servers are asked to `POST /shutdown`, and pre-handshake servers may be SIGTERM'd by port PID before the upgraded server is spawned.
-Port defaults to 4387 (`LAVISH_AXI_PORT`).
+The first command that needs the server spawns `lavish-axi server` as a **detached** background process (`src/cli.js:startServer`) and waits for `/health`, which returns `{ ok, app, host, version }`.
+Subsequent CLI invocations reuse the running server only when its health version matches the current CLI version and the bind host is compatible; stale servers are asked to `POST /shutdown`, and pre-handshake servers may be SIGTERM'd by port PID before the upgraded server is spawned.
+The server defaults to binding `127.0.0.1` and port 4387 (`LAVISH_AXI_PORT`).
+When bound beyond loopback, browser-facing routes can be reached from the network, but file/system routes (`/api/sessions`, `/api/poll`, `/api/:key/agent-reply`, `/api/end`, `/shutdown`) only accept local requests from the server machine.
 
 State lives at `~/.lavish-axi/state.json` (override with `LAVISH_AXI_STATE_DIR`). All sessions across all projects share this one file, keyed by a sha256 prefix of the canonicalized file path - so the CLI never needs opaque session IDs; the canonical HTML path _is_ the identity (`src/session-store.js:sessionKey`).
 
 ### Request flow
 
-1. `lavish-axi <file.html>` (`openCommand`) -> POST `/api/sessions` -> `SessionStore.upsertSession` -> server returns `http://localhost:PORT/session/<key>` and the CLI calls `open` to launch the browser.
+1. `lavish-axi <file.html>` (`openCommand`) -> POST `/api/sessions` -> `SessionStore.upsertSession` -> server returns a host-aware `http://<host>:PORT/session/<key>` URL and the CLI calls `open` to launch the browser.
 2. The browser loads `GET /session/:key`, which serves a chrome page (`createChromeHtml`) containing an iframe pointing at `/artifact/:key/index.html`, a stylesheet at `/chrome.css`, and browser behavior at `/chrome-client.js`.
    The chrome client reads its session bootstrap from the `lavish-session` JSON script in the page.
 3. The artifact route reads the HTML from disk and runs `injectLavishSdk` (`src/html-transform.js`) to append `<script src="/sdk.js?key=...">` and, unless the artifact opts out with `<meta name="lavish-design" content="off">`, inject `/design/daisyui.css`, `/design/tailwindcss-browser.js`, and `/design/daisyui-themes.css`.

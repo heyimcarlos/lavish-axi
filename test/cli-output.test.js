@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
@@ -16,16 +16,21 @@ import {
   createPollOutput,
   createPlaybookOutput,
   createServerSpawnOptions,
+  fileArg,
   getCommandHelp,
   normalizeArgv,
   resolveServerEntry,
   shouldForceRestartForLocalBuild,
   shouldKillProcessOnPort,
+  shouldReuseServerForHost,
   shouldOpenBrowser,
   shouldRestartServer,
+  isLocalServerHost,
   telemetryCommandName,
   VERSION,
 } from "../src/cli.js";
+import { createHttpBaseUrl, formatHttpHost, formatHttpRequestHost } from "../src/network.js";
+import { serve } from "../src/server.js";
 
 test("CLI version tracks package.json so release-please bumps reach the published binary", async () => {
   const packageJson = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
@@ -192,6 +197,30 @@ test("open output keeps the user URL in session data and next_step focused on po
   assert.match(output.next_step, /Do not pass --timeout-ms/);
 });
 
+test("open output carries non-default host through follow-up commands", () => {
+  const output = createOpenOutput({
+    file: "/tmp/artifact.html",
+    host: "0.0.0.0",
+    url: "http://localhost:4387/session/abc123",
+    status: "opened",
+  });
+
+  assert.match(output.next_step, /lavish-axi poll \/tmp\/artifact\.html --host 0\.0\.0\.0/);
+  assert.match(output.next_step, /lavish-axi poll \/tmp\/artifact\.html --host 0\.0\.0\.0 --agent-reply/);
+});
+
+test("open output preserves localhost through follow-up commands", () => {
+  const output = createOpenOutput({
+    file: "/tmp/artifact.html",
+    host: "localhost",
+    url: "http://localhost:4387/session/abc123",
+    status: "opened",
+  });
+
+  assert.match(output.next_step, /lavish-axi poll \/tmp\/artifact\.html --host localhost/);
+  assert.match(output.next_step, /lavish-axi poll \/tmp\/artifact\.html --host localhost --agent-reply/);
+});
+
 test("poll help warns agents not to use short shell timeouts", () => {
   const help = getCommandHelp("poll");
 
@@ -210,6 +239,26 @@ test("feedback next step tells agents to keep polling without timeout flag", () 
 
   assert.match(output.next_step, /without --timeout-ms/);
   assert.match(output.next_step, /above 10 minutes/);
+});
+
+test("poll output carries non-default host through follow-up commands", () => {
+  const output = createPollOutput({
+    file: "/tmp/report.html",
+    host: "0.0.0.0",
+    response: { status: "feedback", dom_snapshot: "", prompts: [] },
+  });
+
+  assert.match(output.next_step, /lavish-axi poll \/tmp\/report\.html --host 0\.0\.0\.0 --agent-reply/);
+});
+
+test("poll output preserves localhost through follow-up commands", () => {
+  const output = createPollOutput({
+    file: "/tmp/report.html",
+    host: "localhost",
+    response: { status: "feedback", dom_snapshot: "", prompts: [] },
+  });
+
+  assert.match(output.next_step, /lavish-axi poll \/tmp\/report\.html --host localhost --agent-reply/);
 });
 
 test("html file arguments normalize to the hidden open command", () => {
@@ -322,3 +371,183 @@ test("polling a file without an active session tells the agent to open it first"
     },
   );
 });
+
+test("fileArg extracts the HTML file when --host flag is present", () => {
+  assert.equal(fileArg(["artifact.html"]), "artifact.html");
+  assert.equal(fileArg(["--host", "100.64.0.1", "artifact.html"]), "artifact.html");
+  assert.equal(fileArg(["--no-open", "--host", "100.64.0.1", "artifact.html"]), "artifact.html");
+  assert.equal(fileArg(["artifact.html", "--host", "100.64.0.1"]), "artifact.html");
+});
+
+test("fileArg ignores flag values that could be confused with the file", () => {
+  assert.equal(fileArg(["--host", "100.64.0.1", "--port", "1234", "artifact.html"]), "artifact.html");
+});
+
+test("fileArg returns undefined when no file is present", () => {
+  assert.equal(fileArg(["--host", "100.64.0.1"]), undefined);
+  assert.equal(fileArg([]), undefined);
+});
+
+test("wildcard host URLs use the matching loopback family", () => {
+  assert.equal(createHttpBaseUrl("0.0.0.0", 4387), "http://127.0.0.1:4387");
+  assert.equal(createHttpBaseUrl("::", 4387), "http://[::1]:4387");
+  assert.equal(createHttpBaseUrl("127.0.0.1", 4387), "http://127.0.0.1:4387");
+  assert.equal(createHttpBaseUrl("::1", 4387), "http://[::1]:4387");
+  assert.equal(formatHttpRequestHost("0.0.0.0"), "127.0.0.1");
+  assert.equal(formatHttpRequestHost("::"), "::1");
+});
+
+test("scoped IPv6 hosts encode zone identifiers for URLs", () => {
+  assert.equal(formatHttpHost("fe80::1%en0"), "[fe80::1%25en0]");
+  assert.equal(formatHttpHost("[fe80::1%en0]"), "[fe80::1%25en0]");
+  assert.equal(createHttpBaseUrl("fe80::1%en0", 4387), "http://[fe80::1%25en0]:4387");
+});
+
+test("scoped IPv6 hosts stay raw for client requests", () => {
+  assert.equal(formatHttpRequestHost("fe80::1%en0"), "fe80::1%en0");
+  assert.equal(formatHttpRequestHost("[fe80::1%en0]"), "fe80::1%en0");
+  assert.equal(formatHttpRequestHost("[fe80::1%25en0]"), "fe80::1%en0");
+});
+
+test("server reuse respects explicit bind hosts", () => {
+  assert.equal(shouldReuseServerForHost("127.0.0.1", { host: "127.0.0.1" }), true);
+  assert.equal(shouldReuseServerForHost("localhost", { host: "127.0.0.1" }), true);
+  assert.equal(shouldReuseServerForHost("::1", { host: "localhost" }), true);
+  assert.equal(shouldReuseServerForHost("0.0.0.0", { host: "0.0.0.0" }), true);
+  assert.equal(shouldReuseServerForHost("0.0.0.0", { host: "127.0.0.1" }), false);
+  assert.equal(shouldReuseServerForHost("::", { host: "::1" }), false);
+  assert.equal(shouldReuseServerForHost("203.0.113.10", { host: "0.0.0.0" }), true);
+  assert.equal(shouldReuseServerForHost("203.0.113.10", { host: "::" }), true);
+  assert.equal(shouldReuseServerForHost("203.0.113.10", { host: "203.0.113.11" }), false);
+});
+
+test("local server host detection keeps remote hosts from starting local servers", () => {
+  assert.equal(isLocalServerHost("127.0.0.1"), true);
+  assert.equal(isLocalServerHost("127.0.0.2"), true);
+  assert.equal(isLocalServerHost("localhost"), true);
+  assert.equal(isLocalServerHost("0.0.0.0"), true);
+  assert.equal(isLocalServerHost("::"), true);
+  assert.equal(isLocalServerHost("203.0.113.10"), false);
+});
+
+const wildcardBindHost = firstNonInternalIpv4();
+(wildcardBindHost ? test : test.skip)("open switches a port from a specific interface to a wildcard bind", async () => {
+  const dir = await mkdtemp(`${os.tmpdir()}/lavish-axi-bind-test-`);
+  const artifactPath = `${dir}/artifact.html`;
+  const stateFile = `${dir}/state.json`;
+  await writeFile(artifactPath, "<h1>Host switch test</h1>");
+  const server = await serve({ port: 0, host: wildcardBindHost, stateFile, version: "9.9.9-test" });
+  const port = server.port;
+  try {
+    const child = spawn(
+      process.execPath,
+      [
+        fileURLToPath(new URL("../bin/lavish-axi.js", import.meta.url)),
+        "open",
+        artifactPath,
+        "--host",
+        "0.0.0.0",
+        "--no-open",
+      ],
+      {
+        cwd: fileURLToPath(new URL("..", import.meta.url)),
+        env: {
+          ...process.env,
+          LAVISH_AXI_PORT: String(port),
+          LAVISH_AXI_STATE_DIR: dir,
+        },
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+    const [status, stdout, stderr] = await Promise.all([
+      new Promise((resolve, reject) => {
+        child.once("error", reject);
+        child.once("close", resolve);
+      }),
+      streamToString(child.stdout),
+      streamToString(child.stderr),
+    ]);
+
+    assert.equal(status, 0, stderr);
+    assert.match(stdout, /status: (opened|ready)/);
+    const health = await (await fetch(`http://${wildcardBindHost}:${port}/health`)).json();
+    assert.equal(health.host, "0.0.0.0");
+    await fetch(`http://${wildcardBindHost}:${port}/shutdown`, { method: "POST" });
+  } finally {
+    await fetch(`http://${wildcardBindHost}:${port}/shutdown`, { method: "POST" }).catch(() => undefined);
+    await server.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+(wildcardBindHost ? test : test.skip)("open switches a port from localhost to a specific interface", async () => {
+  const dir = await mkdtemp(`${os.tmpdir()}/lavish-axi-bind-test-`);
+  const artifactPath = `${dir}/artifact.html`;
+  const stateFile = `${dir}/state.json`;
+  await writeFile(artifactPath, "<h1>Host switch test</h1>");
+  const server = await serve({ port: 0, host: "127.0.0.1", stateFile, version: "9.9.9-test" });
+  const port = server.port;
+  try {
+    const child = spawn(
+      process.execPath,
+      [
+        fileURLToPath(new URL("../bin/lavish-axi.js", import.meta.url)),
+        "open",
+        artifactPath,
+        "--host",
+        wildcardBindHost,
+        "--no-open",
+      ],
+      {
+        cwd: fileURLToPath(new URL("..", import.meta.url)),
+        env: {
+          ...process.env,
+          LAVISH_AXI_PORT: String(port),
+          LAVISH_AXI_STATE_DIR: dir,
+        },
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+    const [status, stdout, stderr] = await Promise.all([
+      new Promise((resolve, reject) => {
+        child.once("error", reject);
+        child.once("close", resolve);
+      }),
+      streamToString(child.stdout),
+      streamToString(child.stderr),
+    ]);
+
+    assert.equal(status, 0, stderr);
+    assert.match(stdout, /status: (opened|ready)/);
+    const health = await (await fetch(`http://${wildcardBindHost}:${port}/health`)).json();
+    assert.equal(health.host, wildcardBindHost);
+    await fetch(`http://${wildcardBindHost}:${port}/shutdown`, { method: "POST" });
+  } finally {
+    await fetch(`http://${wildcardBindHost}:${port}/shutdown`, { method: "POST" }).catch(() => undefined);
+    await server.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+function firstNonInternalIpv4() {
+  for (const addresses of Object.values(os.networkInterfaces())) {
+    for (const address of addresses || []) {
+      if (address && address.family === "IPv4" && !address.internal) {
+        return address.address;
+      }
+    }
+  }
+  return null;
+}
+
+function streamToString(stream) {
+  return new Promise((resolve, reject) => {
+    let data = "";
+    stream.setEncoding("utf8");
+    stream.on("data", (chunk) => {
+      data += chunk;
+    });
+    stream.once("end", () => resolve(data));
+    stream.once("error", reject);
+  });
+}

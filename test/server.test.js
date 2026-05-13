@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import http from "node:http";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { createChromeHtml, createSdkJs, resolveArtifactAsset, serve } from "../src/server.js";
+import { createChromeHtml, createSdkJs, isLocalRequestAddress, resolveArtifactAsset, serve } from "../src/server.js";
 
 async function chromeClientSource() {
   return readFile(new URL("../src/chrome-client.js", import.meta.url), "utf8");
@@ -12,6 +13,36 @@ async function chromeClientSource() {
 
 async function chromeCssSource() {
   return normalizeCssForAssertions(await readFile(new URL("../src/chrome.css", import.meta.url), "utf8"));
+}
+
+async function postJsonWithHost({ hostname, port, path, hostHeader, body }) {
+  return await new Promise((resolve, reject) => {
+    const req = http.request(
+      {
+        hostname,
+        port,
+        path,
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "content-length": Buffer.byteLength(body),
+          host: hostHeader,
+        },
+      },
+      (res) => {
+        let text = "";
+        res.setEncoding("utf8");
+        res.on("data", (chunk) => {
+          text += chunk;
+        });
+        res.on("end", () => {
+          resolve({ status: res.statusCode || 0, body: text });
+        });
+      },
+    );
+    req.on("error", reject);
+    req.end(body);
+  });
 }
 
 function normalizeCssForAssertions(css) {
@@ -436,6 +467,7 @@ test("/health reports the server version so clients can detect upgrades", async 
     const res = await fetch(`http://127.0.0.1:${server.port}/health`);
     const body = await res.json();
     assert.equal(body.ok, true);
+    assert.equal(body.host, "127.0.0.1");
     assert.equal(body.version, "9.9.9-test");
   } finally {
     await server.close();
@@ -529,4 +561,108 @@ test("ended session message renders centered in the main content area", async ()
   assert.match(js, /Return to your agent to continue\./);
   assert.doesNotMatch(js, /The agent polling loop can stop\./);
   assert.doesNotMatch(js, /<span class="file">Session ended\. The agent polling loop can stop\.<\/span>/);
+});
+
+test("session URL uses the custom --host instead of localhost", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "lavish-serve-"));
+  const artifactPath = path.join(dir, "test.html");
+  await writeFile(artifactPath, "<h1>Host test</h1>");
+  const stateFile = path.join(dir, "state.json");
+  const host = "127.0.0.1";
+  const server = await serve({ port: 0, host, stateFile, version: "9.9.9-test" });
+  try {
+    const base = `http://${host}:${server.port}`;
+    const res = await fetch(`${base}/api/sessions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ file: artifactPath }),
+    });
+    const body = await res.json();
+    assert.equal(res.status, 200);
+    assert.match(body.url, /^http:\/\/127\.0\.0\.1:\d+\/session\//);
+    assert.doesNotMatch(body.url, /localhost/);
+  } finally {
+    await server.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("session URL uses the resolved listen port when bound to port 0", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "lavish-serve-"));
+  const artifactPath = path.join(dir, "test.html");
+  await writeFile(artifactPath, "<h1>Port test</h1>");
+  const stateFile = path.join(dir, "state.json");
+  const server = await serve({ port: 0, host: "127.0.0.1", stateFile, version: "9.9.9-test" });
+  try {
+    const res = await fetch(`http://127.0.0.1:${server.port}/api/sessions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ file: artifactPath }),
+    });
+    const body = await res.json();
+    assert.equal(res.status, 200);
+    assert.match(body.url, new RegExp(`^http://127\\.0\\.0\\.1:${server.port}/session/`));
+    assert.doesNotMatch(body.url, /:0\/session\//);
+  } finally {
+    await server.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("wildcard bind hosts advertise matching loopback session URLs", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "lavish-serve-"));
+  const artifactPath = path.join(dir, "test.html");
+  await writeFile(artifactPath, "<h1>Wildcard host test</h1>");
+  const stateFile = path.join(dir, "state.json");
+  const server = await serve({ port: 0, host: "0.0.0.0", stateFile, version: "9.9.9-test" });
+  try {
+    const res = await fetch(`http://127.0.0.1:${server.port}/api/sessions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ file: artifactPath }),
+    });
+    const body = await res.json();
+    assert.equal(res.status, 200);
+    assert.match(body.url, /^http:\/\/127\.0\.0\.1:\d+\/session\//);
+    assert.doesNotMatch(body.url, /localhost|0\.0\.0\.0/);
+    const health = await (await fetch(`http://127.0.0.1:${server.port}/health`)).json();
+    assert.equal(health.host, "0.0.0.0");
+  } finally {
+    await server.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("wildcard bind hosts preserve the request host in session URLs", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "lavish-serve-"));
+  const artifactPath = path.join(dir, "test.html");
+  await writeFile(artifactPath, "<h1>Wildcard host test</h1>");
+  const stateFile = path.join(dir, "state.json");
+  const server = await serve({ port: 0, host: "0.0.0.0", stateFile, version: "9.9.9-test" });
+  try {
+    const res = await postJsonWithHost({
+      hostname: "127.0.0.1",
+      port: server.port,
+      path: "/api/sessions",
+      hostHeader: `10.0.0.5:${server.port}`,
+      body: JSON.stringify({ file: artifactPath }),
+    });
+    const body = JSON.parse(res.body);
+    assert.equal(res.status, 200);
+    assert.match(body.url, /^http:\/\/10\.0\.0\.5:\d+\/session\//);
+    assert.doesNotMatch(body.url, /127\.0\.0\.1|localhost|0\.0\.0\.0/);
+  } finally {
+    await server.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("file API requests must originate from the local machine", () => {
+  assert.equal(isLocalRequestAddress("127.0.0.1", []), true);
+  assert.equal(isLocalRequestAddress("::1", []), true);
+  assert.equal(isLocalRequestAddress("::ffff:127.0.0.1", []), true);
+  assert.equal(isLocalRequestAddress("10.0.0.7", ["10.0.0.7"]), true);
+  assert.equal(isLocalRequestAddress("::ffff:10.0.0.7", ["10.0.0.7"]), true);
+  assert.equal(isLocalRequestAddress("10.0.0.8", ["10.0.0.7"]), false);
+  assert.equal(isLocalRequestAddress("203.0.113.20", ["10.0.0.7"]), false);
 });
