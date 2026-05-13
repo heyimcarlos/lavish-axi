@@ -33,7 +33,7 @@ That loses the thing HTML is best at: interactivity.
 
 Lavish Editor opens agent-generated HTML files in a local browser, lets you pinpoint elements or selected text and send feedback to the agent to address.
 
-- **Local only** - Work with your local HTML artifacts with a local CLI. Zero cloud dependency.
+- **Local-first** - Work with your local HTML artifacts with a local CLI. The server defaults to `127.0.0.1`, and you can bind it elsewhere with `--host` when needed.
 - **Human-AI collaboration** - Annotate elements, selected text ranges, and send messages to the agent without leaving Lavish Editor.
 - **Battery included** - Lavish Editor teaches your agent good visualization for common use cases such as technial plans, design explorations and more out of the box.
 
@@ -108,6 +108,7 @@ pnpm link
 | `lavish-axi <html-file>`      | Open or resume a Lavish Editor session.                      |
 | `lavish-axi poll <html-file>` | Long-poll until the user sends feedback or ends the session. |
 | `lavish-axi end <html-file>`  | End a session.                                               |
+| `lavish-axi server`           | Run the background server manually.                          |
 | `lavish-axi playbook [id]`    | List focused artifact guidance or show one playbook.         |
 | `lavish-axi design`           | Show the injected Tailwind CSS and DaisyUI design reference. |
 
@@ -118,6 +119,7 @@ Known playbook IDs: `diagram`, `table`, `comparison`, `plan`, `diff`, `input`, `
 | Command                  | Flag                  | Description                                                               |
 | ------------------------ | --------------------- | ------------------------------------------------------------------------- |
 | `lavish-axi <html-file>` | `--no-open`           | Ensure the server/session exists without opening another browser window.  |
+| `lavish-axi <html-file> / poll / end / server` | `--host <host>` | Bind the server to another interface; defaults to `127.0.0.1`. |
 | `lavish-axi poll`        | `--agent-reply "..."` | Show the agent's reply in the existing browser chat before polling again. |
 | `lavish-axi poll`        | `--timeout-ms <ms>`   | Test/debug escape hatch only; agents should normally omit it.             |
 
