@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import http from "node:http";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -12,6 +13,36 @@ async function chromeClientSource() {
 
 async function chromeCssSource() {
   return normalizeCssForAssertions(await readFile(new URL("../src/chrome.css", import.meta.url), "utf8"));
+}
+
+async function postJsonWithHost({ hostname, port, path, hostHeader, body }) {
+  return await new Promise((resolve, reject) => {
+    const req = http.request(
+      {
+        hostname,
+        port,
+        path,
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "content-length": Buffer.byteLength(body),
+          host: hostHeader,
+        },
+      },
+      (res) => {
+        let text = "";
+        res.setEncoding("utf8");
+        res.on("data", (chunk) => {
+          text += chunk;
+        });
+        res.on("end", () => {
+          resolve({ status: res.statusCode || 0, body: text });
+        });
+      },
+    );
+    req.on("error", reject);
+    req.end(body);
+  });
 }
 
 function normalizeCssForAssertions(css) {
@@ -596,6 +627,30 @@ test("wildcard bind hosts advertise matching loopback session URLs", async () =>
     assert.doesNotMatch(body.url, /localhost|0\.0\.0\.0/);
     const health = await (await fetch(`http://127.0.0.1:${server.port}/health`)).json();
     assert.equal(health.host, "0.0.0.0");
+  } finally {
+    await server.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("wildcard bind hosts preserve the request host in session URLs", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "lavish-serve-"));
+  const artifactPath = path.join(dir, "test.html");
+  await writeFile(artifactPath, "<h1>Wildcard host test</h1>");
+  const stateFile = path.join(dir, "state.json");
+  const server = await serve({ port: 0, host: "0.0.0.0", stateFile, version: "9.9.9-test" });
+  try {
+    const res = await postJsonWithHost({
+      hostname: "127.0.0.1",
+      port: server.port,
+      path: "/api/sessions",
+      hostHeader: `10.0.0.5:${server.port}`,
+      body: JSON.stringify({ file: artifactPath }),
+    });
+    const body = JSON.parse(res.body);
+    assert.equal(res.status, 200);
+    assert.match(body.url, /^http:\/\/10\.0\.0\.5:\d+\/session\//);
+    assert.doesNotMatch(body.url, /127\.0\.0\.1|localhost|0\.0\.0\.0/);
   } finally {
     await server.close();
     await rm(dir, { recursive: true, force: true });

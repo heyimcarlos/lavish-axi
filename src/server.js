@@ -60,7 +60,8 @@ export async function serve({ port, host = "127.0.0.1", stateFile, version = "" 
     try {
       const file = await canonicalFile(req.body.file);
       const key = sessionKey(file);
-      const url = `${createHttpBaseUrl(host, listeningPort)}/session/${key}`;
+      const urlHost = resolveSessionUrlHost(host, req.headers.host);
+      const url = `${createHttpBaseUrl(urlHost, listeningPort)}/session/${key}`;
       const session = await store.upsertSession(file, url);
       watchSession(session, watchers, events);
       res.json({ key, file, url, status: "opened" });
@@ -354,6 +355,24 @@ export function resolveArtifactAsset(root, assetPath) {
   return file;
 }
 
+function resolveSessionUrlHost(bindHost, requestHostHeader) {
+  if (!isWildcardHost(bindHost)) {
+    return bindHost;
+  }
+  const requestHost = parseRequestHost(requestHostHeader);
+  return requestHost || bindHost;
+}
+
+function parseRequestHost(hostHeader) {
+  const value = String(hostHeader || "").trim();
+  if (!value) return "";
+  try {
+    return new URL(`http://${value}`).hostname;
+  } catch {
+    return "";
+  }
+}
+
 function watchSession(session, watchers, events) {
   if (watchers.has(session.key)) {
     return;
@@ -383,6 +402,10 @@ function setPollActive(key, activePolls, events, active) {
   }
   if (count > 0 === nextCount > 0) return;
   events.emit("agent-working", key, nextCount === 0);
+}
+
+function isWildcardHost(host) {
+  return host === "0.0.0.0" || host === "::";
 }
 
 export function createChromeHtml(session) {
