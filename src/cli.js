@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { AxiError, runAxiCli } from "axi-sdk-js";
 
 import { createDesignOutput, DESIGN_SYSTEM_HINT } from "./design-reference.js";
+import { createHttpBaseUrl } from "./network.js";
 import { defaultPort, ensureStateDir, stateFile } from "./paths.js";
 import { findPlaybook, listPlaybooks, playbookIds } from "./playbooks.js";
 import { serve } from "./server.js";
@@ -272,7 +273,7 @@ function isHtmlPath(file) {
 
 async function ensureServer({ forceRestart = false, host = "127.0.0.1" } = {}) {
   const port = defaultPort();
-  const baseUrl = `http://${host}:${port}`;
+  const baseUrl = createHttpBaseUrl(host, port);
   const existing = await fetchHealth(baseUrl);
   if (existing && !shouldRestartServer(VERSION, existing, forceRestart)) {
     return baseUrl;

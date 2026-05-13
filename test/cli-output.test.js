@@ -27,6 +27,7 @@ import {
   telemetryCommandName,
   VERSION,
 } from "../src/cli.js";
+import { createHttpBaseUrl } from "../src/network.js";
 
 test("CLI version tracks package.json so release-please bumps reach the published binary", async () => {
   const packageJson = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
@@ -335,4 +336,11 @@ test("fileArg ignores flag values that could be confused with the file", () => {
 test("fileArg returns undefined when no file is present", () => {
   assert.equal(fileArg(["--host", "100.64.0.1"]), undefined);
   assert.equal(fileArg([]), undefined);
+});
+
+test("wildcard host URLs normalize to localhost", () => {
+  assert.equal(createHttpBaseUrl("0.0.0.0", 4387), "http://localhost:4387");
+  assert.equal(createHttpBaseUrl("::", 4387), "http://localhost:4387");
+  assert.equal(createHttpBaseUrl("127.0.0.1", 4387), "http://127.0.0.1:4387");
+  assert.equal(createHttpBaseUrl("::1", 4387), "http://[::1]:4387");
 });
