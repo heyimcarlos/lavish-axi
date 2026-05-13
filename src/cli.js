@@ -518,6 +518,12 @@ async function postJson(host, port, path, body) {
   });
 }
 
+/**
+ * @param {string} host
+ * @param {number} port
+ * @param {string} path
+ * @param {{ method?: string, body?: unknown }} [options]
+ */
 function requestJson(host, port, path, { method = "GET", body } = {}) {
   const hostname = formatHttpRequestHost(host);
   const payload = body === undefined ? null : JSON.stringify(body);
