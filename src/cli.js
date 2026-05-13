@@ -385,13 +385,41 @@ async function requestShutdown(host, port) {
 }
 
 async function findLavishServerOnPort(port) {
+  const checkedHosts = new Set();
   for (const listener of findListeningServersOnPort(port)) {
+    checkedHosts.add(listener.host);
     const health = await fetchHealth(listener.host, port);
     if (health && health.app === "lavish-axi") {
       return { host: listener.host, health };
     }
   }
+
+  // Windows does not have lsof, and some platforms allow a wildcard listener to
+  // coexist with an interface-specific listener on the same port. Probe local
+  // interface addresses directly so switching from 10.x.x.x -> 0.0.0.0 can still
+  // find and shut down the old Lavish server before spawning the replacement.
+  for (const host of localProbeHosts()) {
+    if (checkedHosts.has(host)) continue;
+    checkedHosts.add(host);
+    const health = await fetchHealth(host, port);
+    if (health && health.app === "lavish-axi") {
+      return { host, health };
+    }
+  }
   return null;
+}
+
+function localProbeHosts() {
+  const hosts = ["127.0.0.1", "localhost", "::1"];
+  for (const addresses of Object.values(os.networkInterfaces())) {
+    for (const address of addresses || []) {
+      if (!address || address.internal) continue;
+      if (address.family === "IPv4" || address.family === "IPv6") {
+        hosts.push(address.address);
+      }
+    }
+  }
+  return [...new Set(hosts)];
 }
 
 async function waitForPortFree(host, port, timeoutMs) {
